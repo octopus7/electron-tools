@@ -169,15 +169,20 @@ button {
 .menu-bar {
   position: relative;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
   min-height: 42px;
   padding: 0 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: linear-gradient(180deg, rgba(18, 28, 37, 0.92), rgba(15, 23, 31, 0.9));
+  scrollbar-width: none;
 }
 
 .menu-bar__group {
   position: relative;
+  flex: 0 0 auto;
 }
 
 .menu-bar__trigger,
@@ -190,10 +195,16 @@ button {
 }
 
 .menu-bar__trigger {
+  flex: 0 0 auto;
   height: 30px;
   padding: 0 12px;
   background: transparent;
   color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.menu-bar__trigger span {
+  white-space: nowrap;
 }
 
 .menu-bar__trigger:hover,
@@ -217,6 +228,10 @@ button {
   background: linear-gradient(180deg, rgba(24, 36, 47, 0.98), rgba(17, 25, 34, 0.98));
   box-shadow: var(--shadow-strong);
   backdrop-filter: blur(14px);
+}
+
+.menu-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .menu-popover__item {
@@ -299,9 +314,8 @@ button {
 
 .toolbar__spacer {
   width: 60px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent),
-    rgba(255, 255, 255, 0.02);
+  flex: 0 0 60px;
+  background: transparent;
 }
 
 .toolbar__options {
