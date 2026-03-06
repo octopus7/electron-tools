@@ -124,8 +124,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         documents: [...state.documents, nextDocument],
         activeDocumentId: nextDocument.id,
-        workspaceMode:
-          state.workspaceMode === "tabbed-maximized" ? "tabbed-maximized" : "floating",
+        workspaceMode: state.workspaceMode,
         nextDocumentNumber: state.nextDocumentNumber + 1,
         nextZIndex: state.nextZIndex + 1
       };
@@ -210,9 +209,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         documents: remainingDocuments,
-        activeDocumentId: nextActiveDocument.id,
-        workspaceMode:
-          state.workspaceMode === "tabbed-maximized" ? "tabbed-maximized" : "floating"
+        activeDocumentId: nextActiveDocument.id
       };
     }
     case "set-workspace-size":
@@ -249,10 +246,16 @@ export function isToolOptionEnabled(tool: ToolId, option: keyof ToolOptions): bo
   return option === "size" || option === "opacity";
 }
 
-export function formatDocumentLabel(document: Pick<DocumentWindowState, "title" | "width" | "height" | "dirty">): string {
+export function isStrokeTool(tool: ToolId): boolean {
+  return tool === "pencil" || tool === "brush" || tool === "eraser";
+}
+
+export function formatDocumentLabel(
+  document: Pick<DocumentWindowState, "title" | "width" | "height" | "dirty">
+): string {
   const dirtyPrefix = document.dirty ? "* " : "";
 
-  return `${dirtyPrefix}${document.title} · ${document.width}×${document.height}`;
+  return `${dirtyPrefix}${document.title} · ${document.width}x${document.height}`;
 }
 
 function focusDocument(state: AppState, id: string): AppState {
@@ -302,7 +305,7 @@ function createDocument(
 
   return {
     id: `document-${documentNumber}-${Math.random().toString(36).slice(2, 8)}`,
-    title: `문서 ${documentNumber}`,
+    title: `Document ${documentNumber}`,
     width: DEFAULT_IMAGE_WIDTH,
     height: DEFAULT_IMAGE_HEIGHT,
     background: "#ffffff",

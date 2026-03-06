@@ -1,6 +1,15 @@
-import { app, BrowserWindow, ipcMain } from "electron/main";
+import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EngineManager } from "./engine.js";
+import type {
+  AppendStrokePointsRequest,
+  BeginStrokeRequest,
+  CancelStrokeRequest,
+  CloseDocumentRequest,
+  CreateDocumentRequest,
+  EndStrokeRequest
+} from "../shared/engine-protocol.js";
 
 type AppCommand =
   | "file:new"
@@ -21,6 +30,7 @@ const acceleratorMap = new Map<string, AppCommand>([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+const engineManager = new EngineManager();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -55,7 +65,7 @@ function createMainWindow(): BrowserWindow {
   if (rendererUrl) {
     void window.loadURL(rendererUrl);
   } else {
-    void window.loadFile(path.join(__dirname, "../dist/index.html"));
+    void window.loadFile(path.join(__dirname, "../../dist/index.html"));
   }
 
   window.once("ready-to-show", () => {
@@ -96,6 +106,10 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("before-quit", () => {
+  engineManager.dispose();
+});
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
@@ -133,3 +147,23 @@ ipcMain.handle("window:getState", (event) => {
     isMaximized: window?.isMaximized() ?? false
   };
 });
+
+ipcMain.handle("engine:getStatus", async () => engineManager.getStatus());
+ipcMain.handle("engine:createDocument", async (_event, payload: CreateDocumentRequest) =>
+  engineManager.createDocument(payload)
+);
+ipcMain.handle("engine:closeDocument", async (_event, payload: CloseDocumentRequest) =>
+  engineManager.closeDocument(payload)
+);
+ipcMain.handle("engine:beginStroke", async (_event, payload: BeginStrokeRequest) =>
+  engineManager.beginStroke(payload)
+);
+ipcMain.handle("engine:appendStrokePoints", async (_event, payload: AppendStrokePointsRequest) =>
+  engineManager.appendStrokePoints(payload)
+);
+ipcMain.handle("engine:endStroke", async (_event, payload: EndStrokeRequest) =>
+  engineManager.endStroke(payload)
+);
+ipcMain.handle("engine:cancelStroke", async (_event, payload: CancelStrokeRequest) =>
+  engineManager.cancelStroke(payload)
+);

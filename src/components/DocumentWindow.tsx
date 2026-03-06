@@ -78,7 +78,7 @@ export function DocumentWindow({
           <div className="document-window__header-copy">
             <span className="document-window__title">{document.title}</span>
             <span className="document-window__meta">
-              {document.width}×{document.height}
+              {document.width}x{document.height}
             </span>
           </div>
 
@@ -86,7 +86,7 @@ export function DocumentWindow({
             <button
               type="button"
               className="document-window__header-button"
-              aria-label={`${document.title} 최대화`}
+              aria-label={`${document.title} maximize`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onToggleMaximize(document.id)}
             >
@@ -95,7 +95,7 @@ export function DocumentWindow({
             <button
               type="button"
               className="document-window__header-button"
-              aria-label={`${document.title} 닫기`}
+              aria-label={`${document.title} close`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onClose(document.id)}
             >
@@ -110,7 +110,7 @@ export function DocumentWindow({
           <span>{formatDocumentLabel(document)}</span>
         </div>
         <div className="document-window__overlay document-window__overlay--bottom">
-          <span>{activeTool === "pencil" ? "Pencil Live" : `${activeTool} UI Only`}</span>
+          <span>{activeTool === "pencil" ? "Rust stroke pipeline" : `${activeTool} UI only`}</span>
         </div>
         <DocumentCanvas
           documentId={document.id}
@@ -120,7 +120,6 @@ export function DocumentWindow({
           dirty={document.dirty}
           activeTool={activeTool}
           toolOptions={toolOptions}
-          isActive={isActive}
           onActivate={() => onActivate(document.id)}
           onMarkDirty={onMarkDirty}
         />

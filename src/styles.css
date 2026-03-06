@@ -520,6 +520,21 @@ button {
   touch-action: none;
 }
 
+.document-canvas__status {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(10, 16, 22, 0.72);
+  color: var(--text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(10px);
+}
+
 .document-canvas.is-pencil {
   cursor: crosshair;
 }

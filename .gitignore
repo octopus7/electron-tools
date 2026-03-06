@@ -1,4 +1,5 @@
 node_modules/
 dist/
 dist-electron/
+native/engine/target/
 npm-debug.log*

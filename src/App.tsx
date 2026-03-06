@@ -12,16 +12,13 @@ type ToastState = {
   message: string;
 };
 
-const commandMessages: Record<
-  Exclude<AppCommand, "file:new" | "file:exit">,
-  string
-> = {
-  "file:open": "오픈 기능은 다음 단계에서 파일 대화상자와 연결됩니다.",
-  "file:save": "저장 기능은 다음 단계에서 파일 시스템과 연결됩니다.",
-  "file:saveAs": "다른 이름으로 저장은 다음 단계에서 연결됩니다.",
-  "edit:copy": "복사하기는 v1에서 placeholder 명령으로만 연결됩니다.",
-  "edit:paste": "붙여넣기는 v1에서 placeholder 명령으로만 연결됩니다.",
-  "help:about": "Electron Tools v1 shell prototype"
+const commandMessages: Record<Exclude<AppCommand, "file:new" | "file:exit">, string> = {
+  "file:open": "Open is still a placeholder. Wire this command to file dialogs next.",
+  "file:save": "Save is still a placeholder. The Rust document model is ready for persistence next.",
+  "file:saveAs": "Save As is still a placeholder.",
+  "edit:copy": "Copy is not connected yet.",
+  "edit:paste": "Paste is not connected yet.",
+  "help:about": "Electron Tools with Rust stroke engine prototype"
 };
 
 export default function App() {
@@ -103,7 +100,7 @@ export default function App() {
     <div className="app-shell">
       <TitleBar
         activeDocumentLabel={
-          activeDocument ? formatDocumentLabel(activeDocument) : "워크스페이스 셸"
+          activeDocument ? formatDocumentLabel(activeDocument) : "Rust imaging workspace"
         }
         isWindowMaximized={windowMaximized}
         onMinimize={() => {

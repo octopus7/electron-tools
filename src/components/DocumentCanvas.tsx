@@ -1,5 +1,12 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import type { PencilStrokeState, ToolId, ToolOptions } from "../types";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import type {
+  DirtyDisplayTile,
+  EngineMutationResult,
+  StrokeBrushParams,
+  StrokePoint
+} from "../../shared/engine-protocol";
+import { isStrokeTool } from "../state";
+import type { RendererStrokeSession, ToolId, ToolOptions } from "../types";
 
 type DocumentCanvasProps = {
   documentId: string;
@@ -9,9 +16,13 @@ type DocumentCanvasProps = {
   dirty: boolean;
   activeTool: ToolId;
   toolOptions: ToolOptions;
-  isActive: boolean;
   onActivate: () => void;
   onMarkDirty: (id: string) => void;
+};
+
+type SurfaceState = {
+  ready: boolean;
+  detail: string | null;
 };
 
 export function DocumentCanvas({
@@ -26,48 +37,113 @@ export function DocumentCanvas({
   onMarkDirty
 }: DocumentCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const strokeRef = useRef<PencilStrokeState | null>(null);
+  const strokeRef = useRef<RendererStrokeSession | null>(null);
+  const requestChainRef = useRef<Promise<void>>(Promise.resolve());
+  const documentVersionRef = useRef(0);
   const dirtyRef = useRef(dirty);
+  const [surfaceState, setSurfaceState] = useState<SurfaceState>({
+    ready: false,
+    detail: "Waiting for Rust engine..."
+  });
 
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    documentVersionRef.current += 1;
+    const version = documentVersionRef.current;
 
-    if (!canvas) {
+    strokeRef.current = null;
+    clearStrokeFrameQueue();
+    resetCanvas(canvasRef.current, width, height, background);
+    setSurfaceState({
+      ready: false,
+      detail: "Connecting to Rust engine..."
+    });
+
+    queueEngineRequest(async () => {
+      const api = window.electronAPI;
+
+      if (!api) {
+        throw new Error("Electron bridge is unavailable.");
+      }
+
+      const status = await api.engine.getStatus();
+
+      if (!status?.available) {
+        throw new Error(status?.detail ?? "Rust engine is unavailable.");
+      }
+
+      const result = await api.engine.createDocument({
+        documentId,
+        width,
+        height,
+        background
+      });
+
+      if (documentVersionRef.current !== version) {
+        return;
+      }
+
+      applyMutationResult(result);
+      setSurfaceState({
+        ready: true,
+        detail: null
+      });
+    }).catch((error) => {
+      if (documentVersionRef.current !== version) {
+        return;
+      }
+
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+
+    return () => {
+      documentVersionRef.current += 1;
+      cancelStroke(canvasRef.current);
+      void window.electronAPI?.engine
+        .closeDocument({
+          documentId
+        })
+        .catch(() => undefined);
+    };
+  }, [background, documentId, height, width]);
+
+  function queueEngineRequest(task: () => Promise<void>) {
+    const next = requestChainRef.current.then(task, task);
+    requestChainRef.current = next.catch(() => undefined);
+
+    return next;
+  }
+
+  async function sendQueuedPoints(pointerId: number, points: StrokePoint[]) {
+    if (points.length === 0) {
       return;
     }
 
-    const context = canvas.getContext("2d");
+    const result = await window.electronAPI!.engine.appendStrokePoints({
+      documentId,
+      pointerId,
+      points
+    });
 
-    if (!context) {
-      return;
+    applyMutationResult(result);
+  }
+
+  function applyMutationResult(result: EngineMutationResult) {
+    drawTileUpdates(result.dirtyDisplayTiles);
+
+    if (result.documentDirty && !dirtyRef.current) {
+      dirtyRef.current = true;
+      onMarkDirty(documentId);
     }
+  }
 
-    context.imageSmoothingEnabled = false;
-
-    if (canvas.dataset.documentId === documentId) {
-      return;
-    }
-
-    context.clearRect(0, 0, width, height);
-    context.fillStyle = background;
-    context.fillRect(0, 0, width, height);
-    canvas.dataset.documentId = documentId;
-    dirtyRef.current = dirty;
-  }, [background, dirty, documentId, height, width]);
-
-  function beginStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
-    onActivate();
-
-    if (activeTool !== "pencil" || event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
-
+  function drawTileUpdates(updates: DirtyDisplayTile[]) {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
 
@@ -75,79 +151,197 @@ export function DocumentCanvas({
       return;
     }
 
-    const point = getCanvasPoint(event, canvas, width, height);
+    for (const update of updates) {
+      if (update.documentId !== documentId) {
+        continue;
+      }
 
-    if (!point) {
+      const bytes = decodeBase64(update.pixelsBase64);
+      const imageData = context.createImageData(update.width, update.height);
+      imageData.data.set(bytes);
+      context.putImageData(imageData, update.x, update.y);
+    }
+  }
+
+  function beginStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
+    onActivate();
+
+    if (!canDraw(activeTool) || event.button !== 0 || !surfaceState.ready) {
       return;
     }
 
+    const canvas = canvasRef.current;
+    const point = canvas ? getCanvasPoint(event, canvas, width, height) : null;
+
+    if (!canvas || !point) {
+      return;
+    }
+
+    event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
+
     strokeRef.current = {
-      active: true,
       pointerId: event.pointerId,
-      lastPoint: point
+      lastPoint: point,
+      queuedPoints: [],
+      rafId: null
     };
 
-    drawStamp(context, point.x, point.y, toolOptions.size, toolOptions.opacity);
-    markDocumentDirty();
+    queueEngineRequest(async () => {
+      const result = await window.electronAPI!.engine.beginStroke({
+        documentId,
+        pointerId: event.pointerId,
+        tool: activeTool,
+        brush: createBrushParams(toolOptions),
+        point
+      });
+
+      applyMutationResult(result);
+    }).catch((error) => {
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+      cancelStroke(canvas);
+    });
   }
 
   function moveStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
     const stroke = strokeRef.current;
 
-    if (!stroke || !stroke.active || stroke.pointerId !== event.pointerId) {
+    if (!stroke || stroke.pointerId !== event.pointerId) {
       return;
     }
 
     const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-
-    if (!canvas || !context) {
-      return;
-    }
-
-    const point = getCanvasPoint(event, canvas, width, height);
+    const point = canvas ? getCanvasPoint(event, canvas, width, height) : null;
 
     if (!point) {
       return;
     }
 
-    drawLine(
-      context,
-      stroke.lastPoint.x,
-      stroke.lastPoint.y,
-      point.x,
-      point.y,
-      toolOptions.size,
-      toolOptions.opacity
-    );
-    strokeRef.current = {
-      ...stroke,
-      lastPoint: point
-    };
-    markDocumentDirty();
+    stroke.lastPoint = point;
+    stroke.queuedPoints.push(point);
+
+    if (stroke.rafId !== null) {
+      return;
+    }
+
+    stroke.rafId = window.requestAnimationFrame(() => {
+      void flushStrokeQueue();
+    });
+  }
+
+  async function flushStrokeQueue() {
+    const stroke = strokeRef.current;
+
+    if (!stroke) {
+      return;
+    }
+
+    const points = takeQueuedPoints(stroke);
+
+    if (points.length === 0) {
+      return;
+    }
+
+    await queueEngineRequest(async () => {
+      await sendQueuedPoints(stroke.pointerId, points);
+    }).catch((error) => {
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
   }
 
   function endStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
     const stroke = strokeRef.current;
 
-    if (canvas && stroke && stroke.pointerId === event.pointerId) {
-      if (canvas.hasPointerCapture(event.pointerId)) {
-        canvas.releasePointerCapture(event.pointerId);
-      }
-
-      strokeRef.current = null;
-    }
-  }
-
-  function markDocumentDirty() {
-    if (dirtyRef.current) {
+    if (!canvas || !stroke || stroke.pointerId !== event.pointerId) {
       return;
     }
 
-    dirtyRef.current = true;
-    onMarkDirty(documentId);
+    const pointerId = stroke.pointerId;
+    const queuedPoints = takeQueuedPoints(stroke);
+
+    if (canvas.hasPointerCapture(pointerId)) {
+      canvas.releasePointerCapture(pointerId);
+    }
+
+    void queueEngineRequest(async () => {
+      await sendQueuedPoints(pointerId, queuedPoints);
+
+      const result = await window.electronAPI!.engine.endStroke({
+        documentId,
+        pointerId
+      });
+
+      applyMutationResult(result);
+      strokeRef.current = null;
+    }).catch((error) => {
+      strokeRef.current = null;
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
+
+  function abortStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current;
+    const stroke = strokeRef.current;
+
+    if (!canvas || !stroke || stroke.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (canvas.hasPointerCapture(stroke.pointerId)) {
+      canvas.releasePointerCapture(stroke.pointerId);
+    }
+
+    clearStrokeFrameQueue();
+    strokeRef.current = null;
+
+    void queueEngineRequest(async () => {
+      const result = await window.electronAPI!.engine.cancelStroke({
+        documentId,
+        pointerId: event.pointerId
+      });
+
+      applyMutationResult(result);
+    }).catch((error) => {
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    });
+  }
+
+  function clearStrokeFrameQueue() {
+    const stroke = strokeRef.current;
+
+    if (stroke && stroke.rafId !== null) {
+      window.cancelAnimationFrame(stroke.rafId);
+      stroke.rafId = null;
+    }
+  }
+
+  function takeQueuedPoints(stroke: RendererStrokeSession): StrokePoint[] {
+    if (stroke.rafId !== null) {
+      window.cancelAnimationFrame(stroke.rafId);
+      stroke.rafId = null;
+    }
+
+    if (stroke.queuedPoints.length === 0) {
+      return [];
+    }
+
+    const points = [...stroke.queuedPoints];
+    stroke.queuedPoints.length = 0;
+
+    return points;
   }
 
   return (
@@ -155,20 +349,38 @@ export function DocumentCanvas({
       <canvas
         ref={canvasRef}
         className={`document-canvas ${
-          activeTool === "pencil" ? "is-pencil" : "is-inactive-tool"
+          canDraw(activeTool) && surfaceState.ready ? "is-pencil" : "is-inactive-tool"
         }`}
         width={width}
         height={height}
         onPointerDown={beginStroke}
         onPointerMove={moveStroke}
         onPointerUp={endStroke}
-        onPointerCancel={endStroke}
+        onPointerCancel={abortStroke}
         onLostPointerCapture={() => {
           strokeRef.current = null;
+          clearStrokeFrameQueue();
         }}
       />
+      {surfaceState.detail ? (
+        <div className="document-canvas__status">{surfaceState.detail}</div>
+      ) : null}
     </div>
   );
+}
+
+function canDraw(tool: ToolId): tool is "pencil" {
+  return isStrokeTool(tool) && tool === "pencil";
+}
+
+function createBrushParams(toolOptions: ToolOptions): StrokeBrushParams {
+  return {
+    size: toolOptions.size,
+    opacity: toolOptions.opacity,
+    flow: toolOptions.flow,
+    dabSpacing: toolOptions.dabSpacing,
+    color: [16, 20, 27, 255]
+  };
 }
 
 function getCanvasPoint(
@@ -176,7 +388,7 @@ function getCanvasPoint(
   canvas: HTMLCanvasElement,
   width: number,
   height: number
-) {
+): StrokePoint | null {
   const bounds = canvas.getBoundingClientRect();
 
   if (bounds.width === 0 || bounds.height === 0) {
@@ -192,62 +404,45 @@ function getCanvasPoint(
   };
 }
 
-function drawLine(
-  context: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
-  endX: number,
-  endY: number,
-  size: number,
-  opacity: number
-) {
-  let currentX = startX;
-  let currentY = startY;
-  const deltaX = Math.abs(endX - startX);
-  const deltaY = Math.abs(endY - startY);
-  const stepX = startX < endX ? 1 : -1;
-  const stepY = startY < endY ? 1 : -1;
-  let error = deltaX - deltaY;
+function decodeBase64(value: string): Uint8ClampedArray {
+  const binary = window.atob(value);
+  const bytes = new Uint8ClampedArray(binary.length);
 
-  while (true) {
-    drawStamp(context, currentX, currentY, size, opacity);
-
-    if (currentX === endX && currentY === endY) {
-      break;
-    }
-
-    const errorTwice = error * 2;
-
-    if (errorTwice > -deltaY) {
-      error -= deltaY;
-      currentX += stepX;
-    }
-
-    if (errorTwice < deltaX) {
-      error += deltaX;
-      currentY += stepY;
-    }
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
   }
+
+  return bytes;
 }
 
-function drawStamp(
-  context: CanvasRenderingContext2D,
-  centerX: number,
-  centerY: number,
-  size: number,
-  opacity: number
+function resetCanvas(
+  canvas: HTMLCanvasElement | null,
+  width: number,
+  height: number,
+  background: string
 ) {
-  const stampSize = Math.max(1, Math.round(size));
-  const originOffset = Math.floor(stampSize / 2);
-  const alpha = clamp(opacity, 1, 100) / 100;
+  const context = canvas?.getContext("2d");
 
-  context.fillStyle = `rgba(16, 20, 27, ${alpha})`;
-  context.fillRect(
-    Math.round(centerX) - originOffset,
-    Math.round(centerY) - originOffset,
-    stampSize,
-    stampSize
-  );
+  if (!canvas || !context) {
+    return;
+  }
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+  context.imageSmoothingEnabled = false;
+}
+
+function cancelStroke(canvas: HTMLCanvasElement | null) {
+  if (!canvas) {
+    return;
+  }
+
+  for (const pointerId of [0, 1, 2, 3, 4]) {
+    if (canvas.hasPointerCapture(pointerId)) {
+      canvas.releasePointerCapture(pointerId);
+    }
+  }
 }
 
 function clamp(value: number, min: number, max: number) {

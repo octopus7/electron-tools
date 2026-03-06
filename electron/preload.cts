@@ -1,3 +1,14 @@
+import type {
+  AppendStrokePointsRequest,
+  BeginStrokeRequest,
+  CancelStrokeRequest,
+  CloseDocumentRequest,
+  CreateDocumentRequest,
+  EngineMutationResult,
+  EngineStatus,
+  EndStrokeRequest
+} from "../shared/engine-protocol";
+
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -30,5 +41,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.removeListener("app:command", listener);
       };
     }
+  },
+  engine: {
+    getStatus: (): Promise<EngineStatus> => ipcRenderer.invoke("engine:getStatus"),
+    createDocument: (payload: CreateDocumentRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:createDocument", payload),
+    closeDocument: (payload: CloseDocumentRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:closeDocument", payload),
+    beginStroke: (payload: BeginStrokeRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:beginStroke", payload),
+    appendStrokePoints: (payload: AppendStrokePointsRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:appendStrokePoints", payload),
+    endStroke: (payload: EndStrokeRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:endStroke", payload),
+    cancelStroke: (payload: CancelStrokeRequest): Promise<EngineMutationResult> =>
+      ipcRenderer.invoke("engine:cancelStroke", payload)
   }
 });

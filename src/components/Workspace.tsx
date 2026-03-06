@@ -142,8 +142,8 @@ export function Workspace({
     <section className={`workspace workspace--${workspaceMode}`} ref={workspaceRef}>
       {documents.length === 0 ? (
         <div className="workspace__empty-state">
-          <strong>문서가 없습니다.</strong>
-          <p>파일 &gt; 새로 만들기 또는 Ctrl+N으로 새 문서를 여세요.</p>
+          <strong>No documents open.</strong>
+          <p>Use File &gt; New or Ctrl+N to create a document.</p>
         </div>
       ) : null}
 
@@ -211,7 +211,7 @@ export function Workspace({
 }
 
 function resizeFrame(frame: Rect, deltaX: number, deltaY: number, handle: ResizeHandle): Rect {
-  let nextFrame = {
+  const nextFrame = {
     ...frame
   };
 

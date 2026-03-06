@@ -1,3 +1,5 @@
+import type { StrokePoint, StrokeTool } from "../shared/engine-protocol";
+
 export type AppCommand =
   | "file:new"
   | "file:open"
@@ -8,7 +10,7 @@ export type AppCommand =
   | "edit:paste"
   | "help:about";
 
-export type ToolId = "zoom" | "pencil" | "brush" | "eraser";
+export type ToolId = "zoom" | StrokeTool;
 
 export type WorkspaceMode = "floating" | "tabbed-maximized";
 
@@ -45,11 +47,9 @@ export type DocumentWindowState = DocumentModel & {
   zIndex: number;
 };
 
-export type PencilStrokeState = {
-  active: boolean;
-  lastPoint: {
-    x: number;
-    y: number;
-  };
+export type RendererStrokeSession = {
   pointerId: number;
+  lastPoint: StrokePoint;
+  queuedPoints: StrokePoint[];
+  rafId: number | null;
 };
