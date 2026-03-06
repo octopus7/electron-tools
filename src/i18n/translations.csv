@@ -55,4 +55,6 @@ settings.language,Language,언어,言語
 settings.theme,Theme,테마,テーマ
 settings.theme.dark,Dark,다크,ダーク
 settings.theme.light,Light,라이트,ライト
+settings.cancel,Cancel,취소,キャンセル
+settings.confirm,Confirm,확인,確認
 settings.close,Close options,옵션 닫기,オプションを閉じる

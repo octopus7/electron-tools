@@ -6,7 +6,9 @@ import { THEME_OPTIONS, type AppTheme } from "../theme";
 
 type SettingsDialogProps = {
   open: boolean;
+  locale: AppLocale;
   theme: AppTheme;
+  onLocaleChange: (locale: AppLocale) => void;
   onThemeChange: (theme: AppTheme) => void;
   onClose: () => void;
 };
@@ -26,13 +28,26 @@ type SettingsMenuPosition = {
 
 export function SettingsDialog({
   open,
+  locale,
   theme,
+  onLocaleChange,
   onThemeChange,
   onClose
 }: SettingsDialogProps) {
-  const { locale, setLocale, t } = useI18n();
+  const { t } = useI18n();
   const [openSelect, setOpenSelect] = useState<SettingsSelectId>(null);
+  const [draftLocale, setDraftLocale] = useState<AppLocale>(locale);
+  const [draftTheme, setDraftTheme] = useState<AppTheme>(theme);
   const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setDraftLocale(locale);
+    setDraftTheme(theme);
+  }, [locale, open, theme]);
 
   useEffect(() => {
     if (!open) {
@@ -75,11 +90,16 @@ export function SettingsDialog({
     return null;
   }
 
+  const canConfirm = draftLocale !== locale || draftTheme !== theme;
+
   return (
     <div
       className="settings-dialog-backdrop"
       onPointerDown={(event) => {
-        if (dialogRef.current?.contains(event.target as Node)) {
+        if (
+          dialogRef.current?.contains(event.target as Node) ||
+          (event.target as HTMLElement | null)?.closest("[data-settings-select-menu]")
+        ) {
           return;
         }
 
@@ -112,40 +132,67 @@ export function SettingsDialog({
         <div className="settings-dialog__body">
           <SettingsSelect
             label={t("settings.language")}
-            value={getLanguageLabel(locale, t)}
+            value={getLanguageLabel(draftLocale, t)}
             open={openSelect === "language"}
             options={LANGUAGE_OPTIONS.map((option) => ({
               value: option.value,
               label: t(option.labelKey)
             }))}
-            selectedValue={locale}
+            selectedValue={draftLocale}
             onToggle={() => {
               setOpenSelect((current) => (current === "language" ? null : "language"));
             }}
             onSelect={(nextLocale) => {
-              setLocale(nextLocale as AppLocale);
+              setDraftLocale(nextLocale as AppLocale);
               setOpenSelect(null);
             }}
           />
 
           <SettingsSelect
             label={t("settings.theme")}
-            value={getThemeLabel(theme, t)}
+            value={getThemeLabel(draftTheme, t)}
             open={openSelect === "theme"}
             options={THEME_OPTIONS.map((option) => ({
               value: option.value,
               label: t(option.labelKey)
             }))}
-            selectedValue={theme}
+            selectedValue={draftTheme}
             onToggle={() => {
               setOpenSelect((current) => (current === "theme" ? null : "theme"));
             }}
             onSelect={(nextTheme) => {
-              onThemeChange(nextTheme as AppTheme);
+              setDraftTheme(nextTheme as AppTheme);
               setOpenSelect(null);
             }}
           />
         </div>
+
+        <footer className="settings-dialog__footer">
+          <button
+            type="button"
+            className="settings-dialog__button settings-dialog__button--ghost"
+            onClick={onClose}
+          >
+            {t("settings.cancel")}
+          </button>
+          <button
+            type="button"
+            className="settings-dialog__button settings-dialog__button--primary"
+            disabled={!canConfirm}
+            onClick={() => {
+              if (!canConfirm) {
+                onClose();
+                return;
+              }
+
+              onLocaleChange(draftLocale);
+              onThemeChange(draftTheme);
+              onClose();
+            }}
+          >
+            {t("settings.confirm")}
+          </button>
+        </footer>
       </section>
     </div>
   );
@@ -224,6 +271,12 @@ function SettingsSelect<TValue extends string>({
                 top: menuPosition.top,
                 left: menuPosition.left,
                 width: menuPosition.width
+              }}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
               }}
             >
               {options.map((option) => (

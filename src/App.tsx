@@ -98,7 +98,7 @@ function AppShell({
   theme: AppTheme;
   onThemeChange: (theme: AppTheme) => void;
 }) {
-  const { t } = useI18n();
+  const { locale, setLocale, t } = useI18n();
   const [state, dispatch] = useReducer(
     appReducer,
     {
@@ -397,7 +397,9 @@ function AppShell({
 
       <SettingsDialog
         open={settingsOpen}
+        locale={locale}
         theme={theme}
+        onLocaleChange={setLocale}
         onThemeChange={onThemeChange}
         onClose={() => {
           setSettingsOpen(false);
