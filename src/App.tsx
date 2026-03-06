@@ -31,6 +31,8 @@ type ToastState = {
   message: string;
 };
 
+const PERFORMANCE_HISTORY_LIMIT = 132;
+
 export default function App() {
   const [locale, setLocale] = useState<AppLocale>(() => getInitialLocale());
   const [theme, setTheme] = useState<AppTheme>(() => getInitialTheme());
@@ -113,6 +115,7 @@ function AppShell({
   const [performancePanelOpen, setPerformancePanelOpen] = useState(false);
   const [latestPerformanceSample, setLatestPerformanceSample] =
     useState<StrokeFramePerformanceSample | null>(null);
+  const [performanceHistory, setPerformanceHistory] = useState<StrokeFramePerformanceSample[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastIdRef = useRef(0);
@@ -407,12 +410,20 @@ function AppShell({
         }}
         onPerformanceSample={(sample) => {
           setLatestPerformanceSample(sample);
+          setPerformanceHistory((current) => {
+            const next = [...current, sample];
+
+            return next.length > PERFORMANCE_HISTORY_LIMIT
+              ? next.slice(next.length - PERFORMANCE_HISTORY_LIMIT)
+              : next;
+          });
         }}
       />
 
       {performancePanelOpen ? (
         <PerformancePanel
           sample={latestPerformanceSample}
+          history={performanceHistory}
           onClose={() => {
             setPerformancePanelOpen(false);
           }}

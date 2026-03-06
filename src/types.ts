@@ -93,6 +93,14 @@ export type StrokeFramePerformanceSample = {
   updatedAt: number;
 };
 
+export type TimingMetricKey =
+  | "frameTimeMs"
+  | "engineTotalMs"
+  | "strokeInput"
+  | "strokeCommit"
+  | "displayTiles"
+  | "rendererApply";
+
 export type MutationPerformanceContext = {
   documentId: string;
   documentTitle: string;
