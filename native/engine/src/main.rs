@@ -428,9 +428,7 @@ impl DocumentState {
         let mut previous = session.last_point;
 
         for point in points {
-            rasterize_line(previous, *point, |x, y| {
-                self.stamp_point(session, x, y, &mut dirty_tiles);
-            });
+            self.stamp_segment(session, previous, *point, &mut dirty_tiles);
             previous = *point;
         }
 
@@ -439,7 +437,66 @@ impl DocumentState {
         Ok(dirty_tiles)
     }
 
-    fn stamp_point(
+    fn stamp_segment(
+        &self,
+        session: &mut StrokeSession,
+        start: StrokePoint,
+        end: StrokePoint,
+        dirty_tiles: &mut HashSet<TileCoord>,
+    ) {
+        let mut previous_center = None;
+        let stamp_size = session.brush.size.max(1) as i32;
+        let offset = stamp_size / 2;
+
+        rasterize_line(start, end, |x, y| {
+            if let Some((previous_x, previous_y)) = previous_center {
+                let delta_x = x - previous_x;
+                let delta_y = y - previous_y;
+
+                if delta_x != 0 {
+                    let entering_x = if delta_x > 0 {
+                        x - offset + stamp_size - 1
+                    } else {
+                        x - offset
+                    };
+                    self.paint_rect_to_session(
+                        session,
+                        entering_x,
+                        y - offset,
+                        entering_x + 1,
+                        y - offset + stamp_size,
+                        dirty_tiles,
+                    );
+                }
+
+                if delta_y != 0 {
+                    let entering_y = if delta_y > 0 {
+                        y - offset + stamp_size - 1
+                    } else {
+                        y - offset
+                    };
+                    self.paint_rect_to_session(
+                        session,
+                        x - offset,
+                        entering_y,
+                        x - offset + stamp_size,
+                        entering_y + 1,
+                        dirty_tiles,
+                    );
+                }
+
+                if delta_x == 0 && delta_y == 0 {
+                    self.paint_brush_stamp(session, x, y, dirty_tiles);
+                }
+            } else {
+                self.paint_brush_stamp(session, x, y, dirty_tiles);
+            }
+
+            previous_center = Some((x, y));
+        });
+    }
+
+    fn paint_brush_stamp(
         &self,
         session: &mut StrokeSession,
         center_x: i32,
@@ -448,41 +505,76 @@ impl DocumentState {
     ) {
         let stamp_size = session.brush.size.max(1) as i32;
         let offset = stamp_size / 2;
+        self.paint_rect_to_session(
+            session,
+            center_x - offset,
+            center_y - offset,
+            center_x - offset + stamp_size,
+            center_y - offset + stamp_size,
+            dirty_tiles,
+        );
+    }
+
+    fn paint_rect_to_session(
+        &self,
+        session: &mut StrokeSession,
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+        dirty_tiles: &mut HashSet<TileCoord>,
+    ) {
+        let stamp_left = left.clamp(0, self.width as i32);
+        let stamp_top = top.clamp(0, self.height as i32);
+        let stamp_right = right.clamp(0, self.width as i32);
+        let stamp_bottom = bottom.clamp(0, self.height as i32);
+
+        if stamp_left >= stamp_right || stamp_top >= stamp_bottom {
+            return;
+        }
+
         let active_layer = &self.layers[self.active_layer_index];
+        let tile_x_start = stamp_left as usize / TILE_SIZE;
+        let tile_y_start = stamp_top as usize / TILE_SIZE;
+        let tile_x_end = (stamp_right as usize - 1) / TILE_SIZE;
+        let tile_y_end = (stamp_bottom as usize - 1) / TILE_SIZE;
+        let color = session.brush.color;
 
-        for pixel_y in center_y - offset..center_y - offset + stamp_size {
-            for pixel_x in center_x - offset..center_x - offset + stamp_size {
-                if pixel_x < 0
-                    || pixel_y < 0
-                    || pixel_x >= self.width as i32
-                    || pixel_y >= self.height as i32
-                {
-                    continue;
-                }
+        for tile_y in tile_y_start..=tile_y_end {
+            for tile_x in tile_x_start..=tile_x_end {
+                let tile = TileCoord { x: tile_x, y: tile_y };
+                let tile_origin_x = tile_x * TILE_SIZE;
+                let tile_origin_y = tile_y * TILE_SIZE;
+                let (tile_width, tile_height) = tile_dimensions(self.width, self.height, tile);
+                let local_x_start = (stamp_left as usize).saturating_sub(tile_origin_x);
+                let local_y_start = (stamp_top as usize).saturating_sub(tile_origin_y);
+                let local_x_end = (stamp_right as usize).min(tile_origin_x + tile_width) - tile_origin_x;
+                let local_y_end = (stamp_bottom as usize).min(tile_origin_y + tile_height) - tile_origin_y;
 
-                let tile = TileCoord::from_pixel(pixel_x as usize, pixel_y as usize);
                 dirty_tiles.insert(tile);
                 session.touched_tiles.insert(tile);
 
-                session
-                    .stroke_snapshot_tiles
-                    .entry(tile)
-                    .or_insert_with(|| extract_tile(&active_layer.pixels, self.width, self.height, tile));
+                session.stroke_snapshot_tiles.entry(tile).or_insert_with(|| {
+                    extract_tile(&active_layer.pixels, self.width, self.height, tile)
+                });
 
-                let (tile_width, tile_height) = tile_dimensions(self.width, self.height, tile);
                 let scratch_tile = session
                     .stroke_scratch_tiles
                     .entry(tile)
                     .or_insert_with(|| vec![0; tile_width * tile_height * 4]);
-                let local_x = pixel_x as usize - tile.x * TILE_SIZE;
-                let local_y = pixel_y as usize - tile.y * TILE_SIZE;
-                let index = ((local_y * tile_width) + local_x) * 4;
-                let color = session.brush.color;
 
-                scratch_tile[index] = color[0];
-                scratch_tile[index + 1] = color[1];
-                scratch_tile[index + 2] = color[2];
-                scratch_tile[index + 3] = 255;
+                for local_y in local_y_start..local_y_end {
+                    let row_start = ((local_y * tile_width) + local_x_start) * 4;
+                    let row_end = ((local_y * tile_width) + local_x_end) * 4;
+                    let row = &mut scratch_tile[row_start..row_end];
+
+                    for pixel in row.chunks_exact_mut(4) {
+                        pixel[0] = color[0];
+                        pixel[1] = color[1];
+                        pixel[2] = color[2];
+                        pixel[3] = 255;
+                    }
+                }
             }
         }
     }
@@ -656,15 +748,6 @@ impl StrokeSession {
 struct TileCoord {
     x: usize,
     y: usize,
-}
-
-impl TileCoord {
-    fn from_pixel(x: usize, y: usize) -> Self {
-        Self {
-            x: x / TILE_SIZE,
-            y: y / TILE_SIZE,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -1212,6 +1295,43 @@ mod tests {
         assert_eq!(session.stroke_snapshot_tiles.len(), 1);
         assert_eq!(session.stroke_scratch_tiles.len(), 1);
         assert_eq!(session.touched_tiles.len(), 1);
+    }
+
+    #[test]
+    fn thick_brush_marks_all_overlapped_tiles_once() {
+        let document = DocumentState::new(256, 256, [255, 255, 255, 255]);
+        let mut thick_brush = brush(100);
+        thick_brush.size = 40;
+        let mut session = StrokeSession::new(StrokeTool::Pencil, 1, thick_brush, point(127, 127));
+
+        let touched = document
+            .apply_points_to_session(&mut session, &[point(127, 127)])
+            .unwrap();
+
+        assert_eq!(touched.len(), 4);
+        assert_eq!(session.stroke_snapshot_tiles.len(), 4);
+        assert_eq!(session.stroke_scratch_tiles.len(), 4);
+        assert_eq!(session.touched_tiles.len(), 4);
+    }
+
+    #[test]
+    fn thick_brush_segment_keeps_a_continuous_fill() {
+        let document = DocumentState::new(32, 32, [255, 255, 255, 255]);
+        let mut thick_brush = brush(100);
+        thick_brush.size = 5;
+        let mut session = StrokeSession::new(StrokeTool::Pencil, 1, thick_brush, point(4, 4));
+
+        document
+            .apply_points_to_session(&mut session, &[point(8, 4)])
+            .unwrap();
+
+        let tile = document.compose_active_layer_tile(&TileCoord { x: 0, y: 0 }, Some(&session));
+        let tile_width = 32;
+
+        for x in 2..11 {
+            let index = ((4 * tile_width) + x) * 4;
+            assert_eq!(&tile[index..index + 4], &[0, 0, 0, 255]);
+        }
     }
 
     #[test]

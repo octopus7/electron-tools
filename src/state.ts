@@ -15,7 +15,7 @@ const DEFAULT_FRAME_HEIGHT = 560;
 const MIN_FRAME_WIDTH = 320;
 const MIN_FRAME_HEIGHT = 240;
 const TOOL_OPTION_LIMITS = {
-  size: { min: 1, max: 24 },
+  size: { min: 1, max: 200 },
   opacity: { min: 1, max: 100 },
   flow: { min: 1, max: 100 },
   dabSpacing: { min: 1, max: 100 }

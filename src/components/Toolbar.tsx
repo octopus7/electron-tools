@@ -23,7 +23,7 @@ const optionDefinitions: Array<{
   min: number;
   max: number;
 }> = [
-  { key: "size", labelKey: "toolbar.option.size", min: 1, max: 24 },
+  { key: "size", labelKey: "toolbar.option.size", min: 1, max: 200 },
   { key: "opacity", labelKey: "toolbar.option.opacity", min: 1, max: 100 },
   { key: "flow", labelKey: "toolbar.option.flow", min: 1, max: 100 },
   { key: "dabSpacing", labelKey: "toolbar.option.dabSpacing", min: 1, max: 100 }
