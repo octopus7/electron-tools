@@ -49,6 +49,7 @@ export type DocumentSurfaceBootstrap =
   | {
       kind: "loaded";
       initialDisplayTiles: DirtyDisplayTile[];
+      initialPixelPayload: ArrayBuffer | null;
     };
 
 export type DocumentModel = {
@@ -74,7 +75,7 @@ export type RendererStrokeSession = {
   rafId: number | null;
 };
 
-export type RendererPerformanceStageKey = "rendererApply";
+export type RendererPerformanceStageKey = "mainTransfer" | "rendererUpload" | "framePresent";
 
 export type PerformanceStageKey = EnginePerformanceStageKey | RendererPerformanceStageKey;
 
@@ -99,7 +100,10 @@ export type TimingMetricKey =
   | "strokeInput"
   | "strokeCommit"
   | "displayTiles"
-  | "rendererApply";
+  | "responsePack"
+  | "mainTransfer"
+  | "rendererUpload"
+  | "framePresent";
 
 export type MutationPerformanceContext = {
   documentId: string;
@@ -109,7 +113,9 @@ export type MutationPerformanceContext = {
 export function toStrokeFramePerformanceSample(
   context: MutationPerformanceContext,
   performance: EngineFramePerformance,
-  rendererApplyMs: number,
+  mainTransferMs: number,
+  rendererUploadMs: number,
+  framePresentMs: number,
   frameTimeMs: number,
   dirtyTileCount: number
 ): StrokeFramePerformanceSample {
@@ -120,8 +126,16 @@ export function toStrokeFramePerformanceSample(
     stageTimings: [
       ...performance.stageTimings,
       {
-        key: "rendererApply",
-        durationMs: rendererApplyMs
+        key: "mainTransfer",
+        durationMs: mainTransferMs
+      },
+      {
+        key: "rendererUpload",
+        durationMs: rendererUploadMs
+      },
+      {
+        key: "framePresent",
+        durationMs: framePresentMs
       }
     ],
     engineTotalMs: performance.engineTotalMs,

@@ -55,6 +55,7 @@ export type AppAction =
         height: number;
         filePath: string;
         initialDisplayTiles: DirtyDisplayTile[];
+        initialPixelPayload: ArrayBuffer | null;
       };
     }
   | {
@@ -379,6 +380,7 @@ function createLoadedDocument(
     height: number;
     filePath: string;
     initialDisplayTiles: DirtyDisplayTile[];
+    initialPixelPayload: ArrayBuffer | null;
   },
   workspaceSize: WorkspaceSize,
   zIndex: number
@@ -403,7 +405,8 @@ function createLoadedDocument(
     dirty: false,
     surfaceBootstrap: {
       kind: "loaded",
-      initialDisplayTiles: document.initialDisplayTiles
+      initialDisplayTiles: document.initialDisplayTiles,
+      initialPixelPayload: document.initialPixelPayload
     },
     frame,
     zIndex

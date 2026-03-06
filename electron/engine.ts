@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import { app } from "electron";
 import type {
   AppendStrokePointsRequest,
@@ -58,11 +57,12 @@ type EngineEnvelope = {
   payload: EngineRequestPayload["payload"];
 };
 
-type EngineResponseEnvelope = {
+type EngineResponseHeader = {
   id: number;
   ok: boolean;
   result?: unknown;
   error?: string;
+  pixelPayloadByteLength: number;
 };
 
 type PendingRequest = {
@@ -79,6 +79,7 @@ export class EngineManager {
     detail: "Engine binary has not been resolved yet.",
     binaryPath: null
   };
+  private stdoutBuffer = Buffer.alloc(0);
 
   async getStatus(): Promise<EngineStatus> {
     await this.ensureStarted();
@@ -145,6 +146,7 @@ export class EngineManager {
   dispose(): void {
     this.child?.kill();
     this.child = null;
+    this.stdoutBuffer = Buffer.alloc(0);
     this.failPendingRequests("Engine process was disposed.");
   }
 
@@ -162,13 +164,17 @@ export class EngineManager {
         type: payload.type,
         payload: payload.payload
       };
+      const requestBytes = Buffer.from(JSON.stringify(envelope), "utf8");
+      const lengthPrefix = Buffer.allocUnsafe(4);
+
+      lengthPrefix.writeUInt32LE(requestBytes.length, 0);
 
       this.pendingRequests.set(id, {
         resolve,
         reject
       });
 
-      this.child!.stdin.write(`${JSON.stringify(envelope)}\n`, (error) => {
+      this.child!.stdin.write(Buffer.concat([lengthPrefix, requestBytes]), (error) => {
         if (!error) {
           return;
         }
@@ -204,36 +210,15 @@ export class EngineManager {
     });
 
     this.child = child;
+    this.stdoutBuffer = Buffer.alloc(0);
     this.status = {
       available: true,
       detail: null,
       binaryPath
     };
 
-    const stdout = readline.createInterface({
-      input: child.stdout
-    });
-
-    stdout.on("line", (line) => {
-      try {
-        const response = JSON.parse(line) as EngineResponseEnvelope;
-        const pendingRequest = this.pendingRequests.get(response.id);
-
-        if (!pendingRequest) {
-          return;
-        }
-
-        this.pendingRequests.delete(response.id);
-
-        if (response.ok && response.result !== undefined) {
-          pendingRequest.resolve(response.result);
-          return;
-        }
-
-        pendingRequest.reject(new Error(response.error ?? "Rust engine request failed."));
-      } catch (error) {
-        console.error("Failed to parse engine response", error);
-      }
+    child.stdout.on("data", (chunk: Buffer) => {
+      this.handleStdoutChunk(chunk);
     });
 
     child.stderr.on("data", (chunk) => {
@@ -251,6 +236,7 @@ export class EngineManager {
         binaryPath
       };
       this.child = null;
+      this.stdoutBuffer = Buffer.alloc(0);
       this.failPendingRequests(error.message);
     });
 
@@ -261,17 +247,90 @@ export class EngineManager {
         binaryPath
       };
       this.child = null;
+      this.stdoutBuffer = Buffer.alloc(0);
       this.failPendingRequests(this.status.detail ?? "Rust engine exited unexpectedly.");
     });
   }
 
-  private failPendingRequests(reason: string): void {
+  private handleStdoutChunk(chunk: Buffer) {
+    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
+
+    while (this.stdoutBuffer.length >= 4) {
+      const headerLength = this.stdoutBuffer.readUInt32LE(0);
+
+      if (this.stdoutBuffer.length < 4 + headerLength) {
+        return;
+      }
+
+      const headerBytes = this.stdoutBuffer.subarray(4, 4 + headerLength);
+      let header: EngineResponseHeader;
+
+      try {
+        header = JSON.parse(headerBytes.toString("utf8")) as EngineResponseHeader;
+      } catch (error) {
+        console.error("Failed to parse engine response header", error);
+        this.stdoutBuffer = Buffer.alloc(0);
+        return;
+      }
+
+      const payloadLength = header.pixelPayloadByteLength ?? 0;
+      const frameLength = 4 + headerLength + payloadLength;
+
+      if (this.stdoutBuffer.length < frameLength) {
+        return;
+      }
+
+      const payloadBuffer =
+        payloadLength > 0
+          ? this.stdoutBuffer.subarray(4 + headerLength, frameLength)
+          : Buffer.alloc(0);
+
+      this.stdoutBuffer = this.stdoutBuffer.subarray(frameLength);
+      this.resolvePendingRequest(header, payloadBuffer);
+    }
+  }
+
+  private resolvePendingRequest(header: EngineResponseHeader, payloadBuffer: Buffer) {
+    const pendingRequest = this.pendingRequests.get(header.id);
+
+    if (!pendingRequest) {
+      return;
+    }
+
+    this.pendingRequests.delete(header.id);
+
+    if (!header.ok) {
+      pendingRequest.reject(new Error(header.error ?? "Rust engine request failed."));
+      return;
+    }
+
+    pendingRequest.resolve(attachPixelPayload(header.result, payloadBuffer));
+  }
+
+  private failPendingRequests(message: string) {
     for (const pendingRequest of this.pendingRequests.values()) {
-      pendingRequest.reject(new Error(reason));
+      pendingRequest.reject(new Error(message));
     }
 
     this.pendingRequests.clear();
   }
+}
+
+function attachPixelPayload(result: unknown, payloadBuffer: Buffer): unknown {
+  if (!result || typeof result !== "object" || !("dirtyDisplayTiles" in result)) {
+    return result;
+  }
+
+  return {
+    ...result,
+    pixelPayload:
+      payloadBuffer.byteLength > 0
+        ? payloadBuffer.buffer.slice(
+            payloadBuffer.byteOffset,
+            payloadBuffer.byteOffset + payloadBuffer.byteLength
+          )
+        : null
+  };
 }
 
 function resolveEngineBinaryPath(appPath: string): string | null {
@@ -288,5 +347,5 @@ function resolveEngineBinaryPath(appPath: string): string | null {
     }
   }
 
-  return candidates[0] ?? null;
+  return null;
 }

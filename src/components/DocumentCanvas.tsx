@@ -2,8 +2,8 @@ import {
   useEffect,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
-  type MutableRefObject
+  type MutableRefObject,
+  type PointerEvent as ReactPointerEvent
 } from "react";
 import type {
   DirtyDisplayTile,
@@ -11,6 +11,7 @@ import type {
   StrokeBrushParams,
   StrokePoint
 } from "../../shared/engine-protocol";
+import { useI18n } from "../i18n";
 import { isStrokeTool } from "../state";
 import type {
   DocumentSurfaceBootstrap,
@@ -21,7 +22,8 @@ import type {
   ToolOptions
 } from "../types";
 import { toStrokeFramePerformanceSample } from "../types";
-import { useI18n } from "../i18n";
+import type { ViewportBackend } from "../viewport";
+import { WebGL2ViewportBackend } from "../viewport/webgl2";
 
 type DocumentCanvasProps = {
   documentId: string;
@@ -58,11 +60,15 @@ export function DocumentCanvas({
   onPerformanceSample
 }: DocumentCanvasProps) {
   const { t } = useI18n();
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const backendRef = useRef<ViewportBackend | null>(null);
   const strokeRef = useRef<RendererStrokeSession | null>(null);
   const requestChainRef = useRef<Promise<void>>(Promise.resolve());
   const documentVersionRef = useRef(0);
   const dirtyRef = useRef(dirty);
+  const markDirtyRef = useRef(onMarkDirty);
+  const performanceSampleRef = useRef(onPerformanceSample);
   const [surfaceState, setSurfaceState] = useState<SurfaceState>({
     ready: false,
     detail: t("canvas.status.waitingEngine")
@@ -73,19 +79,63 @@ export function DocumentCanvas({
   }, [dirty]);
 
   useEffect(() => {
+    markDirtyRef.current = onMarkDirty;
+  }, [onMarkDirty]);
+
+  useEffect(() => {
+    performanceSampleRef.current = onPerformanceSample;
+  }, [onPerformanceSample]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    const canvas = canvasRef.current;
+
+    if (!shell || !canvas) {
+      return;
+    }
+
     documentVersionRef.current += 1;
     const version = documentVersionRef.current;
 
     strokeRef.current = null;
     clearStrokeFrameQueue(strokeRef);
-    resetCanvas(canvasRef.current, width, height, background);
+    backendRef.current?.dispose();
+    backendRef.current = null;
+
+    let backend: ViewportBackend;
+
+    try {
+      backend = new WebGL2ViewportBackend(canvas);
+      backend.replaceDocumentSurface(width, height);
+      resizeViewport(shell, backend);
+      backendRef.current = backend;
+    } catch (error) {
+      setSurfaceState({
+        ready: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+
+      return;
+    }
 
     if (surfaceBootstrap.kind === "loaded") {
-      drawTileUpdates(canvasRef.current, documentId, surfaceBootstrap.initialDisplayTiles);
-      setSurfaceState({
-        ready: true,
-        detail: null
-      });
+      try {
+        uploadTileUpdates(
+          backend,
+          documentId,
+          surfaceBootstrap.initialDisplayTiles,
+          surfaceBootstrap.initialPixelPayload
+        );
+        setSurfaceState({
+          ready: true,
+          detail: null
+        });
+      } catch (error) {
+        setSurfaceState({
+          ready: false,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      }
     } else {
       setSurfaceState({
         ready: false,
@@ -116,7 +166,7 @@ export function DocumentCanvas({
           return;
         }
 
-        applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+        applyMutationResult(documentId, backend, dirtyRef, markDirtyRef, result);
         setSurfaceState({
           ready: true,
           detail: null
@@ -135,14 +185,48 @@ export function DocumentCanvas({
 
     return () => {
       documentVersionRef.current += 1;
-      cancelStroke(canvasRef.current);
+      cancelStroke(canvas);
+      backendRef.current?.dispose();
+      backendRef.current = null;
       void window.electronAPI?.engine
         .closeDocument({
           documentId
         })
         .catch(() => undefined);
     };
-  }, [background, documentId, height, surfaceBootstrap, width]);
+  }, [background, documentId, height, surfaceBootstrap, t, width]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+
+    if (!shell) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!backendRef.current) {
+        return;
+      }
+
+      resizeViewport(shell, backendRef.current);
+    });
+
+    observer.observe(shell);
+    const handleWindowResize = () => {
+      if (!backendRef.current) {
+        return;
+      }
+
+      resizeViewport(shell, backendRef.current);
+    };
+
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+    };
+  }, []);
 
   async function requestQueuedPoints(pointerId: number, points: StrokePoint[]) {
     if (points.length === 0) {
@@ -159,27 +243,43 @@ export function DocumentCanvas({
   function applyMeasuredMutationResult(
     context: MutationPerformanceContext,
     frameStartedAt: number,
+    resultReceivedAt: number,
     result: EngineMutationResult
   ) {
-    const rendererApplyStartedAt = performance.now();
+    const backend = backendRef.current;
 
-    applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+    if (!backend) {
+      throw new Error("Viewport backend is unavailable.");
+    }
 
-    const rendererApplyMs = performance.now() - rendererApplyStartedAt;
+    const rendererUploadStartedAt = performance.now();
+
+    applyMutationResult(documentId, backend, dirtyRef, markDirtyRef, result);
+
+    const rendererUploadEndedAt = performance.now();
+    const rendererUploadMs = rendererUploadEndedAt - rendererUploadStartedAt;
 
     if (!result.framePerformance) {
       return;
     }
 
     const framePerformance = result.framePerformance;
+    const mainTransferMs = Math.max(
+      0,
+      resultReceivedAt - frameStartedAt - framePerformance.engineTotalMs
+    );
 
     void waitForNextFrame().then(() => {
-      onPerformanceSample(
+      const framePresentedAt = performance.now();
+
+      performanceSampleRef.current(
         toStrokeFramePerformanceSample(
           context,
           framePerformance,
-          rendererApplyMs,
-          performance.now() - frameStartedAt,
+          mainTransferMs,
+          rendererUploadMs,
+          framePresentedAt - rendererUploadEndedAt,
+          framePresentedAt - frameStartedAt,
           result.dirtyDisplayTiles.length
         )
       );
@@ -219,6 +319,7 @@ export function DocumentCanvas({
         brush: createBrushParams(toolOptions),
         point
       });
+      const resultReceivedAt = performance.now();
 
       applyMeasuredMutationResult(
         {
@@ -226,6 +327,7 @@ export function DocumentCanvas({
           documentTitle
         },
         frameStartedAt,
+        resultReceivedAt,
         result
       );
     }).catch((error) => {
@@ -284,12 +386,15 @@ export function DocumentCanvas({
         return;
       }
 
+      const resultReceivedAt = performance.now();
+
       applyMeasuredMutationResult(
         {
           documentId,
           documentTitle
         },
         frameStartedAt,
+        resultReceivedAt,
         result
       );
     }).catch((error) => {
@@ -321,12 +426,15 @@ export function DocumentCanvas({
         const appendResult = await requestQueuedPoints(pointerId, queuedPoints);
 
         if (appendResult) {
+          const appendResultReceivedAt = performance.now();
+
           applyMeasuredMutationResult(
             {
               documentId,
               documentTitle
             },
             appendFrameStartedAt,
+            appendResultReceivedAt,
             appendResult
           );
         }
@@ -337,6 +445,7 @@ export function DocumentCanvas({
         documentId,
         pointerId
       });
+      const resultReceivedAt = performance.now();
 
       applyMeasuredMutationResult(
         {
@@ -344,6 +453,7 @@ export function DocumentCanvas({
           documentTitle
         },
         frameStartedAt,
+        resultReceivedAt,
         result
       );
       strokeRef.current = null;
@@ -377,6 +487,7 @@ export function DocumentCanvas({
         documentId,
         pointerId: event.pointerId
       });
+      const resultReceivedAt = performance.now();
 
       applyMeasuredMutationResult(
         {
@@ -384,6 +495,7 @@ export function DocumentCanvas({
           documentTitle
         },
         frameStartedAt,
+        resultReceivedAt,
         result
       );
     }).catch((error) => {
@@ -395,14 +507,12 @@ export function DocumentCanvas({
   }
 
   return (
-    <div className="document-canvas-shell">
+    <div ref={shellRef} className="document-canvas-shell">
       <canvas
         ref={canvasRef}
         className={`document-canvas ${
           canDraw(activeTool) && surfaceState.ready ? "is-pencil" : "is-inactive-tool"
         }`}
-        width={width}
-        height={height}
         onPointerDown={beginStroke}
         onPointerMove={moveStroke}
         onPointerUp={endStroke}
@@ -453,40 +563,36 @@ function waitForNextFrame(): Promise<void> {
 
 function applyMutationResult(
   documentId: string,
-  canvas: HTMLCanvasElement | null,
+  backend: ViewportBackend,
   dirtyRef: MutableRefObject<boolean>,
-  onMarkDirty: (id: string) => void,
+  markDirtyRef: MutableRefObject<(id: string) => void>,
   result: EngineMutationResult
 ) {
-  drawTileUpdates(canvas, documentId, result.dirtyDisplayTiles);
+  uploadTileUpdates(backend, documentId, result.dirtyDisplayTiles, result.pixelPayload);
 
   if (result.documentDirty && !dirtyRef.current) {
     dirtyRef.current = true;
-    onMarkDirty(documentId);
+    markDirtyRef.current(documentId);
   }
 }
 
-function drawTileUpdates(
-  canvas: HTMLCanvasElement | null,
+function uploadTileUpdates(
+  backend: ViewportBackend,
   documentId: string,
-  updates: DirtyDisplayTile[]
+  updates: DirtyDisplayTile[],
+  pixelPayload: ArrayBuffer | null
 ) {
-  const context = canvas?.getContext("2d");
+  const documentUpdates = updates.filter((update) => update.documentId === documentId);
 
-  if (!canvas || !context) {
+  if (documentUpdates.length === 0) {
     return;
   }
 
-  for (const update of updates) {
-    if (update.documentId !== documentId) {
-      continue;
-    }
+  backend.uploadTiles(documentUpdates, pixelPayload);
+}
 
-    const bytes = decodeBase64(update.pixelsBase64);
-    const imageData = context.createImageData(update.width, update.height);
-    imageData.data.set(bytes);
-    context.putImageData(imageData, update.x, update.y);
-  }
+function resizeViewport(shell: HTMLDivElement, backend: ViewportBackend) {
+  backend.resize(shell.clientWidth, shell.clientHeight, window.devicePixelRatio || 1);
 }
 
 function getCanvasPoint(
@@ -496,13 +602,26 @@ function getCanvasPoint(
   height: number
 ): StrokePoint | null {
   const bounds = canvas.getBoundingClientRect();
+  const displayRect = getFittedDocumentRect(bounds.width, bounds.height, width, height);
 
-  if (bounds.width === 0 || bounds.height === 0) {
+  if (displayRect.width <= 0 || displayRect.height <= 0) {
     return null;
   }
 
-  const x = Math.floor(((event.clientX - bounds.left) / bounds.width) * width);
-  const y = Math.floor(((event.clientY - bounds.top) / bounds.height) * height);
+  const localX = event.clientX - bounds.left - displayRect.x;
+  const localY = event.clientY - bounds.top - displayRect.y;
+
+  if (
+    localX < 0 ||
+    localY < 0 ||
+    localX >= displayRect.width ||
+    localY >= displayRect.height
+  ) {
+    return null;
+  }
+
+  const x = Math.floor((localX / displayRect.width) * width);
+  const y = Math.floor((localY / displayRect.height) * height);
 
   return {
     x: clamp(x, 0, width - 1),
@@ -510,42 +629,25 @@ function getCanvasPoint(
   };
 }
 
-function decodeBase64(value: string): Uint8ClampedArray {
-  const binary = window.atob(value);
-  const bytes = new Uint8ClampedArray(binary.length);
+function getFittedDocumentRect(
+  containerWidth: number,
+  containerHeight: number,
+  documentWidth: number,
+  documentHeight: number
+) {
+  const scale = Math.min(containerWidth / documentWidth, containerHeight / documentHeight);
+  const width = documentWidth * scale;
+  const height = documentHeight * scale;
 
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return bytes;
+  return {
+    x: (containerWidth - width) / 2,
+    y: (containerHeight - height) / 2,
+    width,
+    height
+  };
 }
 
-function resetCanvas(
-  canvas: HTMLCanvasElement | null,
-  width: number,
-  height: number,
-  background: string
-) {
-  const context = canvas?.getContext("2d");
-
-  if (!canvas || !context) {
-    return;
-  }
-
-  context.clearRect(0, 0, width, height);
-
-  if (background !== "#00000000") {
-    context.fillStyle = background;
-    context.fillRect(0, 0, width, height);
-  }
-
-  context.imageSmoothingEnabled = false;
-}
-
-function clearStrokeFrameQueue(
-  strokeRef: MutableRefObject<RendererStrokeSession | null>
-) {
+function clearStrokeFrameQueue(strokeRef: MutableRefObject<RendererStrokeSession | null>) {
   const stroke = strokeRef.current;
 
   if (stroke && stroke.rafId !== null) {

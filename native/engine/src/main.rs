@@ -1,9 +1,8 @@
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{load_from_memory_with_format, save_buffer_with_format, ColorType, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::Instant;
 
@@ -11,24 +10,60 @@ const TILE_SIZE: usize = 128;
 
 fn main() {
     let stdin = io::stdin();
+    let mut stdin = stdin.lock();
     let mut stdout = io::BufWriter::new(io::stdout());
     let mut engine = EngineState::default();
 
-    for line in stdin.lock().lines() {
-        let response = match line {
-            Ok(line) => handle_request_line(&mut engine, &line),
-            Err(error) => ResponseEnvelope::error(0, format!("stdin read failed: {error}")),
+    loop {
+        let request = match read_request_frame(&mut stdin) {
+            Ok(Some(request)) => request,
+            Ok(None) => break,
+            Err(error) => {
+                let response = ResponseEnvelope::error(0, format!("stdin read failed: {error}"));
+                let _ = write_response_frame(&mut stdout, &response);
+                break;
+            }
         };
 
-        if let Ok(serialized) = serde_json::to_string(&response) {
-            let _ = writeln!(stdout, "{serialized}");
-            let _ = stdout.flush();
-        }
+        let response = handle_request_frame(&mut engine, &request);
+        let _ = write_response_frame(&mut stdout, &response);
     }
 }
 
-fn handle_request_line(engine: &mut EngineState, line: &str) -> ResponseEnvelope {
-    let envelope = match serde_json::from_str::<RequestEnvelope>(line) {
+fn read_request_frame(reader: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
+    let mut length_bytes = [0u8; 4];
+
+    match reader.read_exact(&mut length_bytes) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(error),
+    }
+
+    let length = u32::from_le_bytes(length_bytes) as usize;
+    let mut request = vec![0; length];
+    reader.read_exact(&mut request)?;
+
+    Ok(Some(request))
+}
+
+fn write_response_frame(writer: &mut impl Write, response: &ResponseEnvelope) -> io::Result<()> {
+    let header = serde_json::to_vec(response)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let header_length = u32::try_from(header.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "response header too large"))?;
+
+    writer.write_all(&header_length.to_le_bytes())?;
+    writer.write_all(&header)?;
+
+    if let Some(payload) = &response.pixel_payload {
+        writer.write_all(payload)?;
+    }
+
+    writer.flush()
+}
+
+fn handle_request_frame(engine: &mut EngineState, request: &[u8]) -> ResponseEnvelope {
+    let envelope = match serde_json::from_slice::<RequestEnvelope>(request) {
         Ok(envelope) => envelope,
         Err(error) => {
             return ResponseEnvelope::error(0, format!("invalid request: {error}"));
@@ -79,13 +114,14 @@ struct EngineState {
 impl EngineState {
     fn create_document(&mut self, payload: CreateDocumentRequest) -> Result<EngineMutationResult, String> {
         let background = parse_hex_color(&payload.background)?;
-        let document = DocumentState::new(payload.width, payload.height, background);
-        let updates = document.compose_display_tiles(document.all_tile_coords(), None);
+        let mut document = DocumentState::new(payload.width, payload.height, background);
+        let packed_tiles = document.compose_display_tiles(document.all_tile_coords(), None);
 
         self.documents.insert(payload.document_id.clone(), document);
 
         Ok(EngineMutationResult {
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles: with_document_id(&payload.document_id, packed_tiles.updates),
+            pixel_payload: Some(packed_tiles.pixel_payload),
             document_dirty: false,
             frame_performance: None,
         })
@@ -96,6 +132,7 @@ impl EngineState {
 
         Ok(EngineMutationResult {
             dirty_display_tiles: Vec::new(),
+            pixel_payload: None,
             document_dirty: false,
             frame_performance: None,
         })
@@ -114,8 +151,8 @@ impl EngineState {
             return Err("PNG must have non-zero dimensions".to_string());
         }
 
-        let document = DocumentState::from_pixels(width, height, rgba.into_raw());
-        let updates = document.compose_display_tiles(document.all_tile_coords(), None);
+        let mut document = DocumentState::from_pixels(width, height, rgba.into_raw());
+        let packed_tiles = document.compose_display_tiles(document.all_tile_coords(), None);
 
         self.documents.insert(payload.document_id.clone(), document);
 
@@ -125,7 +162,8 @@ impl EngineState {
             width,
             height,
             file_path: payload.path.clone(),
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles: with_document_id(&payload.document_id, packed_tiles.updates),
+            pixel_payload: Some(packed_tiles.pixel_payload),
             document_dirty: false,
         })
     }
@@ -175,18 +213,24 @@ impl EngineState {
         let touched_tiles = document.apply_points_to_session(&mut session, &[payload.point])?;
         let stroke_input_ms = duration_ms(stroke_input_start.elapsed());
         let display_tiles_start = Instant::now();
-        let updates = document.compose_display_tiles(touched_tiles, Some(&session));
+        let packed_tiles = document.compose_display_tiles(touched_tiles, Some(&session));
         let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
+        let response_pack_start = Instant::now();
+        let dirty_display_tiles = with_document_id(&payload.document_id, packed_tiles.updates);
+        let pixel_payload = Some(packed_tiles.pixel_payload);
+        let response_pack_ms = duration_ms(response_pack_start.elapsed());
         document.stroke_session = Some(session);
 
         Ok(EngineMutationResult {
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles,
+            pixel_payload,
             document_dirty: true,
             frame_performance: Some(FramePerformance {
                 phase: StrokeFramePhase::Begin,
                 stage_timings: vec![
                     frame_stage(PerformanceStageKey::StrokeInput, stroke_input_ms),
                     frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                    frame_stage(PerformanceStageKey::ResponsePack, response_pack_ms),
                 ],
                 engine_total_ms: duration_ms(frame_start.elapsed()),
             }),
@@ -206,6 +250,7 @@ impl EngineState {
         if payload.points.is_empty() {
             return Ok(EngineMutationResult {
                 dirty_display_tiles: Vec::new(),
+                pixel_payload: None,
                 document_dirty: document.dirty,
                 frame_performance: None,
             });
@@ -225,18 +270,24 @@ impl EngineState {
         let touched_tiles = document.apply_points_to_session(&mut session, &payload.points)?;
         let stroke_input_ms = duration_ms(stroke_input_start.elapsed());
         let display_tiles_start = Instant::now();
-        let updates = document.compose_display_tiles(touched_tiles, Some(&session));
+        let packed_tiles = document.compose_display_tiles(touched_tiles, Some(&session));
         let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
+        let response_pack_start = Instant::now();
+        let dirty_display_tiles = with_document_id(&payload.document_id, packed_tiles.updates);
+        let pixel_payload = Some(packed_tiles.pixel_payload);
+        let response_pack_ms = duration_ms(response_pack_start.elapsed());
         document.stroke_session = Some(session);
 
         Ok(EngineMutationResult {
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles,
+            pixel_payload,
             document_dirty: true,
             frame_performance: Some(FramePerformance {
                 phase: StrokeFramePhase::Append,
                 stage_timings: vec![
                     frame_stage(PerformanceStageKey::StrokeInput, stroke_input_ms),
                     frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                    frame_stage(PerformanceStageKey::ResponsePack, response_pack_ms),
                 ],
                 engine_total_ms: duration_ms(frame_start.elapsed()),
             }),
@@ -271,17 +322,23 @@ impl EngineState {
 
         document.dirty = document.dirty || !touched_tiles.is_empty();
         let display_tiles_start = Instant::now();
-        let updates = document.compose_display_tiles(touched_tiles, None);
+        let packed_tiles = document.compose_display_tiles(touched_tiles, None);
         let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
+        let response_pack_start = Instant::now();
+        let dirty_display_tiles = with_document_id(&payload.document_id, packed_tiles.updates);
+        let pixel_payload = Some(packed_tiles.pixel_payload);
+        let response_pack_ms = duration_ms(response_pack_start.elapsed());
 
         Ok(EngineMutationResult {
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles,
+            pixel_payload,
             document_dirty: document.dirty,
             frame_performance: Some(FramePerformance {
                 phase: StrokeFramePhase::End,
                 stage_timings: vec![
                     frame_stage(PerformanceStageKey::StrokeCommit, stroke_commit_ms),
                     frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                    frame_stage(PerformanceStageKey::ResponsePack, response_pack_ms),
                 ],
                 engine_total_ms: duration_ms(frame_start.elapsed()),
             }),
@@ -306,18 +363,23 @@ impl EngineState {
         }
 
         let display_tiles_start = Instant::now();
-        let updates = document.compose_display_tiles(session.touched_tiles, None);
+        let packed_tiles = document.compose_display_tiles(session.touched_tiles, None);
         let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
+        let response_pack_start = Instant::now();
+        let dirty_display_tiles = with_document_id(&payload.document_id, packed_tiles.updates);
+        let pixel_payload = Some(packed_tiles.pixel_payload);
+        let response_pack_ms = duration_ms(response_pack_start.elapsed());
 
         Ok(EngineMutationResult {
-            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            dirty_display_tiles,
+            pixel_payload,
             document_dirty: document.dirty,
             frame_performance: Some(FramePerformance {
                 phase: StrokeFramePhase::Cancel,
-                stage_timings: vec![frame_stage(
-                    PerformanceStageKey::DisplayTiles,
-                    display_tiles_ms,
-                )],
+                stage_timings: vec![
+                    frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                    frame_stage(PerformanceStageKey::ResponsePack, response_pack_ms),
+                ],
                 engine_total_ms: duration_ms(frame_start.elapsed()),
             }),
         })
@@ -331,6 +393,7 @@ struct DocumentState {
     active_layer_index: usize,
     stroke_session: Option<StrokeSession>,
     dirty: bool,
+    compose_scratch: Vec<u8>,
 }
 
 impl DocumentState {
@@ -352,6 +415,7 @@ impl DocumentState {
             active_layer_index: 0,
             stroke_session: None,
             dirty: false,
+            compose_scratch: Vec::new(),
         }
     }
 
@@ -424,15 +488,22 @@ impl DocumentState {
     }
 
     fn compose_display_tiles(
-        &self,
+        &mut self,
         tiles: HashSet<TileCoord>,
         preview_session: Option<&StrokeSession>,
-    ) -> Vec<DisplayTileUpdate> {
-        let mut updates = Vec::new();
+    ) -> PackedDisplayTiles {
+        let mut ordered_tiles = tiles.into_iter().collect::<Vec<_>>();
+        ordered_tiles.sort_by_key(|tile| (tile.y, tile.x));
 
-        for tile in tiles {
+        let mut updates = Vec::with_capacity(ordered_tiles.len());
+        let mut pixel_payload = Vec::new();
+
+        for tile in ordered_tiles {
             let (tile_width, tile_height) = tile_dimensions(self.width, self.height, tile);
-            let mut composed = vec![0; tile_width * tile_height * 4];
+            let tile_pixel_count = tile_width * tile_height * 4;
+
+            self.compose_scratch.clear();
+            self.compose_scratch.resize(tile_pixel_count, 0);
 
             for (layer_index, layer) in self.layers.iter().enumerate() {
                 if !layer.visible {
@@ -445,8 +516,11 @@ impl DocumentState {
                     extract_tile(&layer.pixels, self.width, self.height, tile)
                 };
 
-                composite_layer_tile(&mut composed, &pixels, layer.opacity, layer.blend_mode);
+                composite_layer_tile(&mut self.compose_scratch, &pixels, layer.opacity, layer.blend_mode);
             }
+
+            let byte_offset = pixel_payload.len();
+            pixel_payload.extend_from_slice(&self.compose_scratch);
 
             updates.push(DisplayTileUpdate {
                 document_id: String::new(),
@@ -456,11 +530,15 @@ impl DocumentState {
                 y: tile.y * TILE_SIZE,
                 width: tile_width,
                 height: tile_height,
-                pixels_base64: STANDARD.encode(composed),
+                byte_offset,
+                byte_length: tile_pixel_count,
             });
         }
 
-        updates
+        PackedDisplayTiles {
+            updates,
+            pixel_payload,
+        }
     }
 
     fn compose_active_layer_tile(
@@ -644,6 +722,7 @@ enum EngineRequest {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ResponseEnvelope {
     id: u64,
     ok: bool,
@@ -651,15 +730,22 @@ struct ResponseEnvelope {
     result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    pixel_payload_byte_length: usize,
+    #[serde(skip)]
+    pixel_payload: Option<Vec<u8>>,
 }
 
 impl ResponseEnvelope {
-    fn ok<T: Serialize>(id: u64, result: T) -> Self {
+    fn ok<T: Serialize + BinaryPayload>(id: u64, result: T) -> Self {
+        let pixel_payload = result.clone_pixel_payload();
+
         Self {
             id,
             ok: true,
             result: Some(serde_json::to_value(result).expect("response result must serialize")),
             error: None,
+            pixel_payload_byte_length: pixel_payload.as_ref().map_or(0, Vec::len),
+            pixel_payload,
         }
     }
 
@@ -669,8 +755,14 @@ impl ResponseEnvelope {
             ok: false,
             result: None,
             error: Some(error),
+            pixel_payload_byte_length: 0,
+            pixel_payload: None,
         }
     }
+}
+
+trait BinaryPayload {
+    fn clone_pixel_payload(&self) -> Option<Vec<u8>>;
 }
 
 #[derive(Deserialize)]
@@ -738,6 +830,8 @@ struct CancelStrokeRequest {
 #[serde(rename_all = "camelCase")]
 struct EngineMutationResult {
     dirty_display_tiles: Vec<DisplayTileUpdate>,
+    #[serde(skip_serializing)]
+    pixel_payload: Option<Vec<u8>>,
     document_dirty: bool,
     frame_performance: Option<FramePerformance>,
 }
@@ -772,6 +866,7 @@ enum PerformanceStageKey {
     StrokeInput,
     StrokeCommit,
     DisplayTiles,
+    ResponsePack,
 }
 
 #[derive(Serialize)]
@@ -783,6 +878,8 @@ struct LoadedDocumentResult {
     height: usize,
     file_path: String,
     dirty_display_tiles: Vec<DisplayTileUpdate>,
+    #[serde(skip_serializing)]
+    pixel_payload: Option<Vec<u8>>,
     document_dirty: bool,
 }
 
@@ -805,7 +902,31 @@ struct DisplayTileUpdate {
     y: usize,
     width: usize,
     height: usize,
-    pixels_base64: String,
+    byte_offset: usize,
+    byte_length: usize,
+}
+
+struct PackedDisplayTiles {
+    updates: Vec<DisplayTileUpdate>,
+    pixel_payload: Vec<u8>,
+}
+
+impl BinaryPayload for EngineMutationResult {
+    fn clone_pixel_payload(&self) -> Option<Vec<u8>> {
+        self.pixel_payload.clone()
+    }
+}
+
+impl BinaryPayload for LoadedDocumentResult {
+    fn clone_pixel_payload(&self) -> Option<Vec<u8>> {
+        self.pixel_payload.clone()
+    }
+}
+
+impl BinaryPayload for SaveDocumentResult {
+    fn clone_pixel_payload(&self) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 fn with_document_id(document_id: &str, mut updates: Vec<DisplayTileUpdate>) -> Vec<DisplayTileUpdate> {
@@ -1142,9 +1263,12 @@ mod tests {
 
         let mut session = StrokeSession::new(StrokeTool::Pencil, 1, brush(100), point(1, 1));
         let touched = document.apply_points_to_session(&mut session, &[point(1, 1)]).unwrap();
-        let updates = document.compose_display_tiles(touched, Some(&session));
-        let bytes = STANDARD.decode(&updates[0].pixels_base64).unwrap();
-        let index = ((1 * updates[0].width) + 1) * 4;
+        let packed_tiles = document.compose_display_tiles(touched, Some(&session));
+        let update = &packed_tiles.updates[0];
+        let start = update.byte_offset;
+        let end = start + update.byte_length;
+        let bytes = &packed_tiles.pixel_payload[start..end];
+        let index = ((1 * update.width) + 1) * 4;
 
         assert_eq!(&bytes[index..index + 4], &[0, 0, 0, 255]);
     }

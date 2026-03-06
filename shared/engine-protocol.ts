@@ -29,12 +29,17 @@ export type DirtyDisplayTile = {
   y: number;
   width: number;
   height: number;
-  pixelsBase64: string;
+  byteOffset: number;
+  byteLength: number;
 };
 
 export type StrokeFramePhase = "begin" | "append" | "end" | "cancel";
 
-export type EnginePerformanceStageKey = "strokeInput" | "strokeCommit" | "displayTiles";
+export type EnginePerformanceStageKey =
+  | "strokeInput"
+  | "strokeCommit"
+  | "displayTiles"
+  | "responsePack";
 
 export type EnginePerformanceStage = {
   key: EnginePerformanceStageKey;
@@ -49,6 +54,7 @@ export type EngineFramePerformance = {
 
 export type EngineMutationResult = {
   dirtyDisplayTiles: DirtyDisplayTile[];
+  pixelPayload: ArrayBuffer | null;
   documentDirty: boolean;
   framePerformance: EngineFramePerformance | null;
 };
@@ -60,6 +66,7 @@ export type LoadedDocumentResult = {
   height: number;
   filePath: string;
   dirtyDisplayTiles: DirtyDisplayTile[];
+  pixelPayload: ArrayBuffer | null;
   documentDirty: boolean;
 };
 

@@ -16,7 +16,10 @@ import type {
   CloseDocumentRequest,
   CreateDocumentRequest,
   EndStrokeRequest,
+  EngineMutationResult,
   LoadPngRequest,
+  LoadedDocumentResult,
+  SaveDocumentResult,
   SavePngRequest
 } from "../shared/engine-protocol.js";
 
@@ -31,6 +34,48 @@ type AppCommand =
   | "edit:paste"
   | "view:togglePerformance"
   | "help:about";
+
+type EngineRequestEnvelope =
+  | {
+      requestId: number;
+      type: "createDocument";
+      payload: CreateDocumentRequest;
+    }
+  | {
+      requestId: number;
+      type: "closeDocument";
+      payload: CloseDocumentRequest;
+    }
+  | {
+      requestId: number;
+      type: "loadPng";
+      payload: LoadPngRequest;
+    }
+  | {
+      requestId: number;
+      type: "savePng";
+      payload: SavePngRequest;
+    }
+  | {
+      requestId: number;
+      type: "beginStroke";
+      payload: BeginStrokeRequest;
+    }
+  | {
+      requestId: number;
+      type: "appendStrokePoints";
+      payload: AppendStrokePointsRequest;
+    }
+  | {
+      requestId: number;
+      type: "endStroke";
+      payload: EndStrokeRequest;
+    }
+  | {
+      requestId: number;
+      type: "cancelStroke";
+      payload: CancelStrokeRequest;
+    };
 
 const acceleratorMap = new Map<string, AppCommand>([
   ["N", "file:new"],
@@ -231,30 +276,23 @@ ipcMain.handle(
 );
 
 ipcMain.handle("engine:getStatus", async () => engineManager.getStatus());
-ipcMain.handle("engine:createDocument", async (_event, payload: CreateDocumentRequest) =>
-  engineManager.createDocument(payload)
-);
-ipcMain.handle("engine:closeDocument", async (_event, payload: CloseDocumentRequest) =>
-  engineManager.closeDocument(payload)
-);
-ipcMain.handle("engine:loadPng", async (_event, payload: LoadPngRequest) =>
-  engineManager.loadPng(payload)
-);
-ipcMain.handle("engine:savePng", async (_event, payload: SavePngRequest) =>
-  engineManager.savePng(payload)
-);
-ipcMain.handle("engine:beginStroke", async (_event, payload: BeginStrokeRequest) =>
-  engineManager.beginStroke(payload)
-);
-ipcMain.handle("engine:appendStrokePoints", async (_event, payload: AppendStrokePointsRequest) =>
-  engineManager.appendStrokePoints(payload)
-);
-ipcMain.handle("engine:endStroke", async (_event, payload: EndStrokeRequest) =>
-  engineManager.endStroke(payload)
-);
-ipcMain.handle("engine:cancelStroke", async (_event, payload: CancelStrokeRequest) =>
-  engineManager.cancelStroke(payload)
-);
+ipcMain.on("engine:request", async (event, envelope: EngineRequestEnvelope) => {
+  const responseChannel = `engine:response:${envelope.requestId}`;
+
+  try {
+    const result = await dispatchEngineRequest(envelope);
+
+    sendEngineResponse(event.sender, responseChannel, {
+      ok: true,
+      result
+    });
+  } catch (error) {
+    sendEngineResponse(event.sender, responseChannel, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
 
 function ensurePngFilePath(filePath: string): string {
   if (/\.png$/i.test(filePath)) {
@@ -264,4 +302,49 @@ function ensurePngFilePath(filePath: string): string {
   const parsed = path.parse(filePath);
 
   return path.join(parsed.dir, `${parsed.name}.png`);
+}
+
+async function dispatchEngineRequest(
+  envelope: EngineRequestEnvelope
+): Promise<EngineMutationResult | LoadedDocumentResult | SaveDocumentResult> {
+  switch (envelope.type) {
+    case "createDocument":
+      return engineManager.createDocument(envelope.payload);
+    case "closeDocument":
+      return engineManager.closeDocument(envelope.payload);
+    case "loadPng":
+      return engineManager.loadPng(envelope.payload);
+    case "savePng":
+      return engineManager.savePng(envelope.payload);
+    case "beginStroke":
+      return engineManager.beginStroke(envelope.payload);
+    case "appendStrokePoints":
+      return engineManager.appendStrokePoints(envelope.payload);
+    case "endStroke":
+      return engineManager.endStroke(envelope.payload);
+    case "cancelStroke":
+      return engineManager.cancelStroke(envelope.payload);
+    default:
+      throw new Error("Unknown engine request.");
+  }
+}
+
+function sendEngineResponse(
+  webContents: Electron.WebContents,
+  channel: string,
+  payload: {
+    ok: boolean;
+    result?: EngineMutationResult | LoadedDocumentResult | SaveDocumentResult;
+    error?: string;
+  }
+) {
+  if (webContents.isDestroyed()) {
+    return;
+  }
+
+  try {
+    webContents.send(channel, payload);
+  } catch {
+    return;
+  }
 }

@@ -50,7 +50,7 @@ export function PerformancePanel({ sample, history, onClose }: PerformancePanelP
             <TimingMetricRow
               label={t("performance.frameTime")}
               value={`${sample.frameTimeMs.toFixed(2)} ms`}
-              series={buildMetricSeries(history, "frameTimeMs")}
+              series={buildMetricSeries(history, "frameTimeMs", sample.phase)}
             />
             <div className="performance-panel__metric">
               <span>{t("performance.fps")}</span>
@@ -59,7 +59,7 @@ export function PerformancePanel({ sample, history, onClose }: PerformancePanelP
             <TimingMetricRow
               label={t("performance.engineTotal")}
               value={`${sample.engineTotalMs.toFixed(2)} ms`}
-              series={buildMetricSeries(history, "engineTotalMs")}
+              series={buildMetricSeries(history, "engineTotalMs", sample.phase)}
             />
             <div className="performance-panel__metric">
               <span>{t("performance.dirtyTiles")}</span>
@@ -73,7 +73,7 @@ export function PerformancePanel({ sample, history, onClose }: PerformancePanelP
                 key={stage.key}
                 label={t(stageLabelKey(stage.key))}
                 value={`${stage.durationMs.toFixed(2)} ms`}
-                series={buildMetricSeries(history, toTimingMetricKey(stage.key))}
+                series={buildMetricSeries(history, toTimingMetricKey(stage.key), sample.phase)}
               />
             ))}
           </div>
@@ -146,9 +146,12 @@ function normalizeValues(values: number[]): number[] {
 
 function buildMetricSeries(
   history: StrokeFramePerformanceSample[],
-  metricKey: TimingMetricKey
+  metricKey: TimingMetricKey,
+  phase: StrokeFramePerformanceSample["phase"]
 ): number[] {
-  return history.map((sample) => metricValue(sample, metricKey));
+  return history
+    .filter((sample) => sample.phase === phase)
+    .map((sample) => metricValue(sample, metricKey));
 }
 
 function metricValue(sample: StrokeFramePerformanceSample, metricKey: TimingMetricKey): number {
@@ -173,8 +176,14 @@ function stageLabelKey(stageKey: PerformanceStageKey): string {
       return "performance.stage.strokeCommit";
     case "displayTiles":
       return "performance.stage.displayTiles";
-    case "rendererApply":
-      return "performance.stage.rendererApply";
+    case "responsePack":
+      return "performance.stage.responsePack";
+    case "mainTransfer":
+      return "performance.stage.mainTransfer";
+    case "rendererUpload":
+      return "performance.stage.rendererUpload";
+    case "framePresent":
+      return "performance.stage.framePresent";
     default:
       return stageKey;
   }

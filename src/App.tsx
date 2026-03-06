@@ -170,7 +170,8 @@ function AppShell({
           width: result.width,
           height: result.height,
           filePath: result.filePath,
-          initialDisplayTiles: result.dirtyDisplayTiles
+          initialDisplayTiles: result.dirtyDisplayTiles,
+          initialPixelPayload: result.pixelPayload
         }
       });
       return;

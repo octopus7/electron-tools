@@ -74,4 +74,7 @@ performance.dirtyTiles,Dirty tiles,더티 타일 수,ダーティタイル数
 performance.stage.strokeInput,Stroke input,스트로크 입력 처리,ストローク入力処理
 performance.stage.strokeCommit,Stroke commit,스트로크 커밋,ストロークコミット
 performance.stage.displayTiles,Display tiles,표시 타일 생성,表示タイル生成
-performance.stage.rendererApply,Renderer apply,렌더러 반영,レンダラー反映
+performance.stage.responsePack,Response pack,응답 패킹,レスポンスパック
+performance.stage.mainTransfer,Main transfer,메인 전송,メイン転送
+performance.stage.rendererUpload,Renderer upload,렌더러 업로드,レンダラーアップロード
+performance.stage.framePresent,Frame present,프레임 표시,フレーム表示
