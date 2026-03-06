@@ -1,14 +1,26 @@
 import { BrushIcon, EraserIcon, PencilIcon, ZoomIcon } from "../icons";
 import { useI18n, type TranslationKey } from "../i18n";
 import { isToolOptionEnabled } from "../state";
-import type { ToolId, ToolOptions } from "../types";
+import type { NumericToolOptionKey, ToolId, ToolOptions } from "../types";
 
 type ToolbarProps = {
   activeTool: ToolId;
   toolOptions: ToolOptions;
   onSelectTool: (tool: ToolId) => void;
-  onChangeOption: (key: keyof ToolOptions, value: number) => void;
+  onChangeOption: (key: NumericToolOptionKey, value: number) => void;
+  onSelectColor: (color: string) => void;
 };
+
+const colorPresets = [
+  "#10141b",
+  "#ffffff",
+  "#d63b3b",
+  "#f08700",
+  "#f2c94c",
+  "#2fbf71",
+  "#3a86ff",
+  "#9b5de5"
+] as const;
 
 const toolDefinitions = [
   { id: "zoom" as const, labelKey: "toolbar.tool.zoom" as TranslationKey, icon: ZoomIcon },
@@ -18,7 +30,7 @@ const toolDefinitions = [
 ];
 
 const optionDefinitions: Array<{
-  key: keyof ToolOptions;
+  key: NumericToolOptionKey;
   labelKey: TranslationKey;
   min: number;
   max: number;
@@ -33,7 +45,8 @@ export function Toolbar({
   activeTool,
   toolOptions,
   onSelectTool,
-  onChangeOption
+  onChangeOption,
+  onSelectColor
 }: ToolbarProps) {
   const { t } = useI18n();
 
@@ -58,6 +71,21 @@ export function Toolbar({
       </div>
 
       <div className="toolbar__spacer" />
+
+      <div className="toolbar__palette">
+        {colorPresets.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={`toolbar__swatch ${toolOptions.color === color ? "is-active" : ""}`}
+            style={{ backgroundColor: color }}
+            aria-label={color}
+            onClick={() => {
+              onSelectColor(color);
+            }}
+          />
+        ))}
+      </div>
 
       <div className="toolbar__options">
         {optionDefinitions.map((option) => {

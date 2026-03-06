@@ -334,6 +334,12 @@ function AppShell({
             value
           });
         }}
+        onSelectColor={(color) => {
+          dispatch({
+            type: "set-tool-color",
+            color
+          });
+        }}
       />
 
       {state.workspaceMode === "tabbed-maximized" ? (

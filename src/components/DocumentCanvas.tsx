@@ -539,8 +539,26 @@ function createBrushParams(toolOptions: ToolOptions): StrokeBrushParams {
     opacity: toolOptions.opacity,
     flow: toolOptions.flow,
     dabSpacing: toolOptions.dabSpacing,
-    color: [16, 20, 27, 255]
+    color: hexToRgba(toolOptions.color)
   };
+}
+
+function hexToRgba(value: string): [number, number, number, number] {
+  const normalized = value.trim().replace(/^#/, "");
+
+  if (normalized.length !== 6) {
+    return [16, 20, 27, 255];
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+  if ([red, green, blue].some(Number.isNaN)) {
+    return [16, 20, 27, 255];
+  }
+
+  return [red, green, blue, 255];
 }
 
 function queueEngineRequest(

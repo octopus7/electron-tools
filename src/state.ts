@@ -1,6 +1,7 @@
 import type { DirtyDisplayTile } from "../shared/engine-protocol";
 import type {
   DocumentWindowState,
+  NumericToolOptionKey,
   Rect,
   ToolId,
   ToolOptions,
@@ -19,7 +20,7 @@ const TOOL_OPTION_LIMITS = {
   opacity: { min: 1, max: 100 },
   flow: { min: 1, max: 100 },
   dabSpacing: { min: 1, max: 100 }
-} as const;
+} satisfies Record<NumericToolOptionKey, { min: number; max: number }>;
 
 export type AppState = {
   activeTool: ToolId;
@@ -39,8 +40,12 @@ export type AppAction =
     }
   | {
       type: "set-tool-option";
-      key: keyof ToolOptions;
+      key: NumericToolOptionKey;
       value: number;
+    }
+  | {
+      type: "set-tool-color";
+      color: string;
     }
   | {
       type: "create-document";
@@ -107,7 +112,8 @@ export function createInitialState(initialState: {
       size: 1,
       opacity: 100,
       flow: 100,
-      dabSpacing: 12
+      dabSpacing: 12,
+      color: "#10141b"
     },
     documents: [firstDocument],
     activeDocumentId: firstDocument.id,
@@ -134,6 +140,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         toolOptions: {
           ...state.toolOptions,
           [action.key]: clampToolOption(action.key, action.value)
+        }
+      };
+    case "set-tool-color":
+      return {
+        ...state,
+        toolOptions: {
+          ...state.toolOptions,
+          color: action.color
         }
       };
     case "create-document": {
@@ -290,7 +304,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-export function isToolOptionEnabled(tool: ToolId, option: keyof ToolOptions): boolean {
+export function isToolOptionEnabled(tool: ToolId, option: NumericToolOptionKey): boolean {
   if (tool !== "pencil") {
     return false;
   }
@@ -436,7 +450,7 @@ function clampDocumentFrame(frame: Rect, workspaceSize: WorkspaceSize): Rect {
   };
 }
 
-function clampToolOption(option: keyof ToolOptions, value: number): number {
+function clampToolOption(option: NumericToolOptionKey, value: number): number {
   const limits = TOOL_OPTION_LIMITS[option];
 
   return clamp(Math.round(value), limits.min, limits.max);

@@ -589,26 +589,60 @@ impl DocumentState {
 
         let mut updates = Vec::with_capacity(ordered_tiles.len());
         let mut pixel_payload = Vec::new();
+        let mut layer_tile_scratch = Vec::new();
+        let can_bypass_composite = self.can_bypass_display_composite();
 
         for tile in ordered_tiles {
             let (tile_width, tile_height) = tile_dimensions(self.width, self.height, tile);
             let tile_pixel_count = tile_width * tile_height * 4;
 
+            if can_bypass_composite {
+                self.compose_active_layer_tile_into(&tile, preview_session, &mut layer_tile_scratch);
+
+                let byte_offset = pixel_payload.len();
+                pixel_payload.extend_from_slice(&layer_tile_scratch);
+
+                updates.push(DisplayTileUpdate {
+                    document_id: String::new(),
+                    tile_x: tile.x,
+                    tile_y: tile.y,
+                    x: tile.x * TILE_SIZE,
+                    y: tile.y * TILE_SIZE,
+                    width: tile_width,
+                    height: tile_height,
+                    byte_offset,
+                    byte_length: tile_pixel_count,
+                });
+
+                continue;
+            }
+
             self.compose_scratch.clear();
             self.compose_scratch.resize(tile_pixel_count, 0);
 
-            for (layer_index, layer) in self.layers.iter().enumerate() {
-                if !layer.visible {
+            for layer_index in 0..self.layers.len() {
+                if !self.layers[layer_index].visible {
                     continue;
                 }
 
-                let pixels = if layer_index == self.active_layer_index {
-                    self.compose_active_layer_tile(&tile, preview_session)
+                if layer_index == self.active_layer_index {
+                    self.compose_active_layer_tile_into(&tile, preview_session, &mut layer_tile_scratch);
                 } else {
-                    extract_tile(&layer.pixels, self.width, self.height, tile)
-                };
+                    copy_tile_into(
+                        &mut layer_tile_scratch,
+                        &self.layers[layer_index].pixels,
+                        self.width,
+                        self.height,
+                        tile,
+                    );
+                }
 
-                composite_layer_tile(&mut self.compose_scratch, &pixels, layer.opacity, layer.blend_mode);
+                composite_layer_tile(
+                    &mut self.compose_scratch,
+                    &layer_tile_scratch,
+                    self.layers[layer_index].opacity,
+                    self.layers[layer_index].blend_mode,
+                );
             }
 
             let byte_offset = pixel_payload.len();
@@ -633,33 +667,60 @@ impl DocumentState {
         }
     }
 
+    fn compose_active_layer_tile_into(
+        &self,
+        tile: &TileCoord,
+        preview_session: Option<&StrokeSession>,
+        target: &mut Vec<u8>,
+    ) {
+        let Some(session) = preview_session else {
+            copy_tile_into(
+                target,
+                &self.layers[self.active_layer_index].pixels,
+                self.width,
+                self.height,
+                *tile,
+            );
+            return;
+        };
+
+        let Some(snapshot) = session.stroke_snapshot_tiles.get(tile) else {
+            copy_tile_into(
+                target,
+                &self.layers[self.active_layer_index].pixels,
+                self.width,
+                self.height,
+                *tile,
+            );
+            return;
+        };
+
+        let Some(scratch) = session.stroke_scratch_tiles.get(tile) else {
+            copy_tile_into(
+                target,
+                &self.layers[self.active_layer_index].pixels,
+                self.width,
+                self.height,
+                *tile,
+            );
+            return;
+        };
+
+        target.clear();
+        target.resize(snapshot.len(), 0);
+        target.copy_from_slice(snapshot);
+        apply_tool_to_tile(target, scratch, session.tool);
+        mix_tile_in_place(snapshot, target, session.brush.opacity);
+    }
+
     fn compose_active_layer_tile(
         &self,
         tile: &TileCoord,
         preview_session: Option<&StrokeSession>,
     ) -> Vec<u8> {
-        let committed = extract_tile(
-            &self.layers[self.active_layer_index].pixels,
-            self.width,
-            self.height,
-            *tile,
-        );
-
-        let Some(session) = preview_session else {
-            return committed;
-        };
-
-        let Some(snapshot) = session.stroke_snapshot_tiles.get(tile) else {
-            return committed;
-        };
-
-        let Some(scratch) = session.stroke_scratch_tiles.get(tile) else {
-            return committed;
-        };
-
-        let mut working = snapshot.clone();
-        apply_tool_to_tile(&mut working, scratch, session.tool);
-        mix_tiles(snapshot, &working, session.brush.opacity)
+        let mut tile_pixels = Vec::new();
+        self.compose_active_layer_tile_into(tile, preview_session, &mut tile_pixels);
+        tile_pixels
     }
 
     fn compose_full_display_pixels(&self) -> Vec<u8> {
@@ -698,6 +759,32 @@ impl DocumentState {
         }
 
         tiles
+    }
+
+    fn can_bypass_display_composite(&self) -> bool {
+        let mut visible_count = 0;
+
+        for (layer_index, layer) in self.layers.iter().enumerate() {
+            if !layer.visible {
+                continue;
+            }
+
+            visible_count += 1;
+
+            if layer_index != self.active_layer_index {
+                return false;
+            }
+
+            if !matches!(layer.blend_mode, BlendMode::Normal) {
+                return false;
+            }
+
+            if (layer.opacity - 1.0).abs() > f32::EPSILON {
+                return false;
+            }
+        }
+
+        visible_count == 1
     }
 }
 
@@ -1044,8 +1131,23 @@ fn tile_dimensions(width: usize, height: usize, tile: TileCoord) -> (usize, usiz
 }
 
 fn extract_tile(pixels: &[u8], width: usize, height: usize, tile: TileCoord) -> Vec<u8> {
+    let mut tile_pixels = Vec::new();
+    copy_tile_into(&mut tile_pixels, pixels, width, height, tile);
+    tile_pixels
+}
+
+fn copy_tile_into(
+    target: &mut Vec<u8>,
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    tile: TileCoord,
+) {
     let (tile_width, tile_height) = tile_dimensions(width, height, tile);
-    let mut tile_pixels = vec![0; tile_width * tile_height * 4];
+    let tile_byte_len = tile_width * tile_height * 4;
+
+    target.clear();
+    target.resize(tile_byte_len, 0);
 
     for row in 0..tile_height {
         let src_y = tile.y * TILE_SIZE + row;
@@ -1053,10 +1155,8 @@ fn extract_tile(pixels: &[u8], width: usize, height: usize, tile: TileCoord) -> 
         let src_end = src_start + (tile_width * 4);
         let dst_start = row * tile_width * 4;
         let dst_end = dst_start + (tile_width * 4);
-        tile_pixels[dst_start..dst_end].copy_from_slice(&pixels[src_start..src_end]);
+        target[dst_start..dst_end].copy_from_slice(&pixels[src_start..src_end]);
     }
-
-    tile_pixels
 }
 
 fn write_tile(pixels: &mut [u8], width: usize, height: usize, tile: TileCoord, tile_pixels: &[u8]) {
@@ -1104,19 +1204,16 @@ fn apply_tool_to_tile(target: &mut [u8], scratch: &[u8], tool: StrokeTool) {
     }
 }
 
-fn mix_tiles(snapshot: &[u8], working: &[u8], opacity: u8) -> Vec<u8> {
+fn mix_tile_in_place(snapshot: &[u8], working: &mut [u8], opacity: u8) {
     let alpha = (opacity as f32 / 100.0).clamp(0.0, 1.0);
-    let mut mixed = vec![0; snapshot.len()];
 
     for index in 0..snapshot.len() {
         let snapshot_value = snapshot[index] as f32;
         let working_value = working[index] as f32;
-        mixed[index] = (snapshot_value + ((working_value - snapshot_value) * alpha))
+        working[index] = (snapshot_value + ((working_value - snapshot_value) * alpha))
             .round()
             .clamp(0.0, 255.0) as u8;
     }
-
-    mixed
 }
 
 fn composite_layer_tile(target: &mut [u8], source: &[u8], layer_opacity: f32, blend_mode: BlendMode) {

@@ -40,7 +40,10 @@ export type ToolOptions = {
   opacity: number;
   flow: number;
   dabSpacing: number;
+  color: string;
 };
+
+export type NumericToolOptionKey = "size" | "opacity" | "flow" | "dabSpacing";
 
 export type DocumentSurfaceBootstrap =
   | {

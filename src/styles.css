@@ -539,6 +539,33 @@ button {
   background: transparent;
 }
 
+.toolbar__palette {
+  display: grid;
+  grid-template-columns: repeat(4, 18px);
+  grid-template-rows: repeat(2, 18px);
+  gap: 10px;
+  align-content: center;
+  justify-content: center;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--panel-surface);
+  box-shadow: inset 0 0 0 1px var(--tool-surface-border);
+}
+
+.toolbar__swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+
+.toolbar__swatch.is-active {
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 0.9),
+    0 0 0 2px var(--accent);
+}
+
 .toolbar__options {
   display: grid;
   grid-template-columns: repeat(4, minmax(150px, 1fr));
