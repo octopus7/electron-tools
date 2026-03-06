@@ -19,6 +19,9 @@ export type WindowStatePayload = {
 };
 
 export interface ElectronAPI {
+  system: {
+    getLocale: () => Promise<string>;
+  };
   window: {
     minimize: () => Promise<void>;
     toggleMaximize: () => Promise<WindowStatePayload>;
@@ -30,8 +33,11 @@ export interface ElectronAPI {
     onExecute: (callback: (command: AppCommand) => void) => () => void;
   };
   dialogs: {
-    openPng: () => Promise<string | null>;
-    savePng: (defaultPath: string | null) => Promise<string | null>;
+    openPng: (payload?: { title?: string; filterName?: string }) => Promise<string | null>;
+    savePng: (
+      defaultPath: string | null,
+      payload?: { title?: string; filterName?: string }
+    ) => Promise<string | null>;
   };
   engine: {
     getStatus: () => Promise<EngineStatus>;

@@ -44,6 +44,7 @@ export type AppAction =
     }
   | {
       type: "create-document";
+      title: string;
     }
   | {
       type: "open-document";
@@ -94,8 +95,10 @@ export type AppAction =
       dirty: boolean;
     };
 
-export function createInitialState(): AppState {
-  const firstDocument = createDocument(1, { width: 0, height: 0 }, 1);
+export function createInitialState(initialState: {
+  defaultDocumentTitle: string;
+}): AppState {
+  const firstDocument = createDocument(1, { width: 0, height: 0 }, 1, initialState.defaultDocumentTitle);
 
   return {
     activeTool: "pencil",
@@ -136,7 +139,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const nextDocument = createDocument(
         state.nextDocumentNumber,
         state.workspaceSize,
-        state.nextZIndex
+        state.nextZIndex,
+        action.title
       );
 
       return {
@@ -337,7 +341,8 @@ function focusDocument(state: AppState, id: string): AppState {
 function createDocument(
   documentNumber: number,
   workspaceSize: WorkspaceSize,
-  zIndex: number
+  zIndex: number,
+  title: string
 ): DocumentWindowState {
   const offset = ((documentNumber - 1) % 6) * 28;
   const frame = clampDocumentFrame(
@@ -352,7 +357,7 @@ function createDocument(
 
   return {
     id: `document-${documentNumber}-${Math.random().toString(36).slice(2, 8)}`,
-    title: `Document ${documentNumber}`,
+    title,
     width: DEFAULT_IMAGE_WIDTH,
     height: DEFAULT_IMAGE_HEIGHT,
     background: "#ffffff",

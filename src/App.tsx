@@ -1,10 +1,28 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { MenuBar } from "./components/MenuBar";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { TabStrip } from "./components/TabStrip";
 import { TitleBar } from "./components/TitleBar";
 import { Toolbar } from "./components/Toolbar";
 import { Workspace } from "./components/Workspace";
+import {
+  I18nProvider,
+  getInitialLocale,
+  normalizeLocale,
+  persistLocale,
+  readStoredLocale,
+  useI18n,
+  type AppLocale
+} from "./i18n";
 import { appReducer, createInitialState, formatDocumentLabel } from "./state";
+import {
+  applyTheme,
+  getInitialTheme,
+  getSystemTheme,
+  persistTheme,
+  readStoredTheme,
+  type AppTheme
+} from "./theme";
 import type { AppCommand, DocumentWindowState } from "./types";
 
 type ToastState = {
@@ -12,21 +30,95 @@ type ToastState = {
   message: string;
 };
 
-const commandMessages: Record<Exclude<AppCommand, "file:new" | "file:open" | "file:save" | "file:saveAs" | "file:exit">, string> =
-  {
-    "edit:copy": "Copy is not connected yet.",
-    "edit:paste": "Paste is not connected yet.",
-    "help:about": "Electron Tools with Rust stroke engine prototype"
-  };
-
 export default function App() {
-  const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
+  const [locale, setLocale] = useState<AppLocale>(() => getInitialLocale());
+  const [theme, setTheme] = useState<AppTheme>(() => getInitialTheme());
+
+  useEffect(() => {
+    if (readStoredLocale()) {
+      return;
+    }
+
+    let disposed = false;
+
+    void window.electronAPI?.system
+      .getLocale()
+      .then((systemLocale) => {
+        if (!disposed) {
+          setLocale(normalizeLocale(systemLocale));
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (readStoredTheme() || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: light)");
+    const handleChange = () => {
+      setTheme(getSystemTheme());
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  return (
+    <I18nProvider
+      locale={locale}
+      onLocaleChange={(nextLocale) => {
+        persistLocale(nextLocale);
+        setLocale(nextLocale);
+      }}
+    >
+      <AppShell
+        theme={theme}
+        onThemeChange={(nextTheme) => {
+          persistTheme(nextTheme);
+          setTheme(nextTheme);
+        }}
+      />
+    </I18nProvider>
+  );
+}
+
+function AppShell({
+  theme,
+  onThemeChange
+}: {
+  theme: AppTheme;
+  onThemeChange: (theme: AppTheme) => void;
+}) {
+  const { t } = useI18n();
+  const [state, dispatch] = useReducer(
+    appReducer,
+    {
+      defaultDocumentTitle: t("document.defaultTitle", {
+        number: 1
+      })
+    },
+    createInitialState
+  );
   const [windowMaximized, setWindowMaximized] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastIdRef = useRef(0);
   const commandHandlerRef = useRef<(command: AppCommand) => Promise<void>>(async () => undefined);
   const activeDocument =
     state.documents.find((document) => document.id === state.activeDocumentId) ?? null;
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   function pushToast(message: string) {
     toastIdRef.current += 1;
@@ -39,14 +131,20 @@ export default function App() {
   commandHandlerRef.current = async (command: AppCommand) => {
     if (command === "file:new") {
       dispatch({
-        type: "create-document"
+        type: "create-document",
+        title: t("document.defaultTitle", {
+          number: state.nextDocumentNumber
+        })
       });
       return;
     }
 
     if (command === "file:open") {
       const api = getElectronApi();
-      const filePath = await api.dialogs.openPng();
+      const filePath = await api.dialogs.openPng({
+        title: t("dialog.openPng.title"),
+        filterName: t("dialog.pngFilter")
+      });
 
       if (!filePath) {
         return;
@@ -73,14 +171,17 @@ export default function App() {
 
     if (command === "file:save" || command === "file:saveAs") {
       if (!activeDocument) {
-        pushToast("No document is active.");
+        pushToast(t("toast.noActiveDocument"));
         return;
       }
 
       const api = getElectronApi();
       const shouldPrompt = command === "file:saveAs" || !activeDocument.filePath;
       const chosenPath = shouldPrompt
-        ? await api.dialogs.savePng(buildDefaultSavePath(activeDocument))
+        ? await api.dialogs.savePng(buildDefaultSavePath(activeDocument), {
+            title: t("dialog.savePng.title"),
+            filterName: t("dialog.pngFilter")
+          })
         : activeDocument.filePath;
 
       if (!chosenPath) {
@@ -99,7 +200,16 @@ export default function App() {
         filePath: result.filePath,
         dirty: result.documentDirty
       });
-      pushToast(`Saved ${result.title}`);
+      pushToast(
+        t("toast.saved", {
+          title: result.title
+        })
+      );
+      return;
+    }
+
+    if (command === "file:options") {
+      setSettingsOpen(true);
       return;
     }
 
@@ -108,7 +218,17 @@ export default function App() {
       return;
     }
 
-    pushToast(commandMessages[command]);
+    if (command === "edit:copy") {
+      pushToast(t("toast.copyPlaceholder"));
+      return;
+    }
+
+    if (command === "edit:paste") {
+      pushToast(t("toast.pastePlaceholder"));
+      return;
+    }
+
+    pushToast(t("toast.about"));
   };
 
   function executeCommand(command: AppCommand) {
@@ -159,10 +279,10 @@ export default function App() {
   }, [toast]);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-theme={theme}>
       <TitleBar
         activeDocumentLabel={
-          activeDocument ? formatDocumentLabel(activeDocument) : "Rust imaging workspace"
+          activeDocument ? formatDocumentLabel(activeDocument) : t("app.workspaceFallback")
         }
         isWindowMaximized={windowMaximized}
         onMinimize={() => {
@@ -272,6 +392,15 @@ export default function App() {
             id,
             dirty: true
           });
+        }}
+      />
+
+      <SettingsDialog
+        open={settingsOpen}
+        theme={theme}
+        onThemeChange={onThemeChange}
+        onClose={() => {
+          setSettingsOpen(false);
         }}
       />
 

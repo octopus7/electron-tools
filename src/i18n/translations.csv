@@ -1,0 +1,58 @@
+key,en,ko,ja
+app.name,Electron Tools,Electron Tools,Electron Tools
+app.workspaceFallback,Rust imaging workspace,Rust 이미징 작업공간,Rust イメージングワークスペース
+menu.file,File,파일,ファイル
+menu.file.new,New,새로 만들기,新規作成
+menu.file.open,Open,열기,開く
+menu.file.save,Save,저장,保存
+menu.file.saveAs,Save As,다른 이름으로 저장,名前を付けて保存
+menu.file.options,Options,옵션,オプション
+menu.file.exit,Exit,종료,終了
+menu.edit,Edit,편집,編集
+menu.edit.copy,Copy,복사하기,コピー
+menu.edit.paste,Paste,붙여넣기,貼り付け
+menu.options,Options,옵션,オプション
+menu.options.language,Language,언어,言語
+menu.about,About,About,About
+language.english,English,English,English
+language.korean,한국어,한국어,한국어
+language.japanese,日本語,日本語,日本語
+toolbar.tool.zoom,Zoom,줌,ズーム
+toolbar.tool.pencil,Pencil,연필,鉛筆
+toolbar.tool.brush,Brush,브러시,ブラシ
+toolbar.tool.eraser,Eraser,지우개,消しゴム
+toolbar.option.size,Size,크기,サイズ
+toolbar.option.opacity,Opacity,투명도,不透明度
+toolbar.option.flow,Flow,흐름,フロー
+toolbar.option.dabSpacing,Dab Spacing,Dab 간격,ダブ間隔
+workspace.empty.title,No documents open.,열린 문서가 없습니다.,開いているドキュメントがありません。
+workspace.empty.body,Use File > New or Ctrl+N to create a document.,파일 > 새로 만들기 또는 Ctrl+N으로 문서를 만드세요.,ファイル > 新規作成 または Ctrl+N でドキュメントを作成してください。
+document.header.maximize,Maximize,최대화,最大化
+document.header.close,Close,닫기,閉じる
+document.overlay.pipeline,Rust stroke pipeline,Rust 스트로크 파이프라인,Rust ストロークパイプライン
+document.overlay.uiOnly,{tool} UI only,{tool} UI 전용,{tool} UI 専用
+document.tab.restore,Restore Document,문서 복원,ドキュメントを復元
+titlebar.minimize,Minimize window,창 최소화,ウィンドウを最小化
+titlebar.maximize,Maximize window,창 최대화,ウィンドウを最大化
+titlebar.restore,Restore window,창 복원,ウィンドウを元に戻す
+titlebar.close,Close window,창 닫기,ウィンドウを閉じる
+canvas.status.waitingEngine,Waiting for Rust engine...,Rust 엔진 대기 중...,Rust エンジンを待機中...
+canvas.status.connectingEngine,Connecting to Rust engine...,Rust 엔진 연결 중...,Rust エンジンに接続中...
+error.bridgeUnavailable,Electron bridge is unavailable.,Electron 브리지를 사용할 수 없습니다.,Electron ブリッジを使用できません。
+error.engineUnavailable,Rust engine is unavailable.,Rust 엔진을 사용할 수 없습니다.,Rust エンジンを使用できません。
+toast.noActiveDocument,No document is active.,활성 문서가 없습니다.,アクティブなドキュメントがありません。
+toast.saved,Saved {title},{title} 저장됨,{title} を保存しました
+toast.copyPlaceholder,Copy is not connected yet.,복사 기능은 아직 연결되지 않았습니다.,コピー機能はまだ接続されていません。
+toast.pastePlaceholder,Paste is not connected yet.,붙여넣기 기능은 아직 연결되지 않았습니다.,貼り付け機能はまだ接続されていません。
+toast.about,Electron Tools with Rust stroke engine prototype,Rust 스트로크 엔진 기반 Electron Tools 프로토타입,Rust ストロークエンジンベースの Electron Tools プロトタイプ
+document.defaultTitle,Document {number},문서 {number},ドキュメント {number}
+save.defaultUntitled,Untitled,제목 없음,無題
+dialog.openPng.title,Open PNG,PNG 열기,PNG を開く
+dialog.savePng.title,Save PNG,PNG 저장,PNG を保存
+dialog.pngFilter,PNG Images,PNG 이미지,PNG 画像
+settings.title,Options,옵션,オプション
+settings.language,Language,언어,言語
+settings.theme,Theme,테마,テーマ
+settings.theme.dark,Dark,다크,ダーク
+settings.theme.light,Light,라이트,ライト
+settings.close,Close options,옵션 닫기,オプションを閉じる

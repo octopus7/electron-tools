@@ -9,6 +9,7 @@ export type AppCommand =
   | "file:open"
   | "file:save"
   | "file:saveAs"
+  | "file:options"
   | "file:exit"
   | "edit:copy"
   | "edit:paste"

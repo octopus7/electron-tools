@@ -1,4 +1,5 @@
 import { AppGlyph, CloseIcon, MaximizeIcon, MinimizeIcon, RestoreIcon } from "../icons";
+import { useI18n } from "../i18n";
 
 type TitleBarProps = {
   activeDocumentLabel: string;
@@ -15,6 +16,8 @@ export function TitleBar({
   onToggleMaximize,
   onClose
 }: TitleBarProps) {
+  const { t } = useI18n();
+
   return (
     <header className="titlebar">
       <div className="titlebar__brand">
@@ -22,7 +25,7 @@ export function TitleBar({
           <AppGlyph />
         </div>
         <div className="titlebar__copy">
-          <span className="titlebar__name">Electron Tools</span>
+          <span className="titlebar__name">{t("app.name")}</span>
           <span className="titlebar__divider" aria-hidden="true">
             /
           </span>
@@ -34,7 +37,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button"
-          aria-label="Minimize window"
+          aria-label={t("titlebar.minimize")}
           onClick={onMinimize}
         >
           <MinimizeIcon />
@@ -42,7 +45,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button"
-          aria-label={isWindowMaximized ? "Restore window" : "Maximize window"}
+          aria-label={isWindowMaximized ? t("titlebar.restore") : t("titlebar.maximize")}
           onClick={onToggleMaximize}
         >
           {isWindowMaximized ? <RestoreIcon /> : <MaximizeIcon />}
@@ -50,7 +53,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button caption-button--close"
-          aria-label="Close window"
+          aria-label={t("titlebar.close")}
           onClick={onClose}
         >
           <CloseIcon />

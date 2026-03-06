@@ -18,6 +18,7 @@ import type {
   ToolId,
   ToolOptions
 } from "../types";
+import { useI18n } from "../i18n";
 
 type DocumentCanvasProps = {
   documentId: string;
@@ -49,6 +50,7 @@ export function DocumentCanvas({
   onActivate,
   onMarkDirty
 }: DocumentCanvasProps) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const strokeRef = useRef<RendererStrokeSession | null>(null);
   const requestChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -56,7 +58,7 @@ export function DocumentCanvas({
   const dirtyRef = useRef(dirty);
   const [surfaceState, setSurfaceState] = useState<SurfaceState>({
     ready: false,
-    detail: "Waiting for Rust engine..."
+    detail: t("canvas.status.waitingEngine")
   });
 
   useEffect(() => {
@@ -80,20 +82,20 @@ export function DocumentCanvas({
     } else {
       setSurfaceState({
         ready: false,
-        detail: "Connecting to Rust engine..."
+        detail: t("canvas.status.connectingEngine")
       });
 
       queueEngineRequest(requestChainRef, async () => {
         const api = window.electronAPI;
 
         if (!api) {
-          throw new Error("Electron bridge is unavailable.");
+          throw new Error(t("error.bridgeUnavailable"));
         }
 
         const status = await api.engine.getStatus();
 
         if (!status?.available) {
-          throw new Error(status?.detail ?? "Rust engine is unavailable.");
+          throw new Error(status?.detail ?? t("error.engineUnavailable"));
         }
 
         const result = await api.engine.createDocument({

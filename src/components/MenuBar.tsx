@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon, InfoIcon } from "../icons";
+import { useI18n, type TranslationKey } from "../i18n";
 import type { AppCommand } from "../types";
 
 type MenuEntry =
   | {
       kind: "item";
       id: string;
-      label: string;
+      labelKey: TranslationKey;
       command: AppCommand;
       accelerator?: string;
     }
@@ -17,7 +18,7 @@ type MenuEntry =
 
 type MenuDefinition = {
   id: string;
-  label: string;
+  labelKey: TranslationKey;
   entries?: MenuEntry[];
   command?: AppCommand;
 };
@@ -25,12 +26,12 @@ type MenuDefinition = {
 const menuDefinitions: MenuDefinition[] = [
   {
     id: "file",
-    label: "\uD30C\uC77C",
+    labelKey: "menu.file",
     entries: [
       {
         kind: "item",
         id: "file-new",
-        label: "\uC0C8\uB85C \uB9CC\uB4E4\uAE30",
+        labelKey: "menu.file.new",
         command: "file:new",
         accelerator: "Ctrl+N"
       },
@@ -41,21 +42,21 @@ const menuDefinitions: MenuDefinition[] = [
       {
         kind: "item",
         id: "file-open",
-        label: "\uC624\uD508",
+        labelKey: "menu.file.open",
         command: "file:open",
         accelerator: "Ctrl+O"
       },
       {
         kind: "item",
         id: "file-save",
-        label: "\uC800\uC7A5",
+        labelKey: "menu.file.save",
         command: "file:save",
         accelerator: "Ctrl+S"
       },
       {
         kind: "item",
         id: "file-save-as",
-        label: "\uB2E4\uB978 \uC774\uB984\uC73C\uB85C \uC800\uC7A5",
+        labelKey: "menu.file.saveAs",
         command: "file:saveAs"
       },
       {
@@ -64,27 +65,37 @@ const menuDefinitions: MenuDefinition[] = [
       },
       {
         kind: "item",
+        id: "file-options",
+        labelKey: "menu.file.options",
+        command: "file:options"
+      },
+      {
+        kind: "separator",
+        id: "file-separator-3"
+      },
+      {
+        kind: "item",
         id: "file-exit",
-        label: "\uC885\uB8CC",
+        labelKey: "menu.file.exit",
         command: "file:exit"
       }
     ]
   },
   {
     id: "edit",
-    label: "\uD3B8\uC9D1",
+    labelKey: "menu.edit",
     entries: [
       {
         kind: "item",
         id: "edit-copy",
-        label: "\uBCF5\uC0AC\uD558\uAE30",
+        labelKey: "menu.edit.copy",
         command: "edit:copy",
         accelerator: "Ctrl+C"
       },
       {
         kind: "item",
         id: "edit-paste",
-        label: "\uBD99\uC5EC\uB123\uAE30",
+        labelKey: "menu.edit.paste",
         command: "edit:paste",
         accelerator: "Ctrl+V"
       }
@@ -92,7 +103,7 @@ const menuDefinitions: MenuDefinition[] = [
   },
   {
     id: "about",
-    label: "About",
+    labelKey: "menu.about",
     command: "help:about"
   }
 ];
@@ -107,6 +118,7 @@ type PopoverPosition = {
 };
 
 export function MenuBar({ onCommand }: MenuBarProps) {
+  const { t } = useI18n();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -209,7 +221,7 @@ export function MenuBar({ onCommand }: MenuBarProps) {
                   setActiveMenuId(isOpen ? null : menu.id);
                 }}
               >
-                <span>{menu.label}</span>
+                <span>{t(menu.labelKey)}</span>
                 {hasEntries ? <ChevronDownIcon /> : <InfoIcon />}
               </button>
             </div>
@@ -240,7 +252,7 @@ export function MenuBar({ onCommand }: MenuBarProps) {
                   onCommand(entry.command);
                 }}
               >
-                <span>{entry.label}</span>
+                <span>{t(entry.labelKey)}</span>
                 <span className="menu-popover__accelerator">{entry.accelerator ?? ""}</span>
               </button>
             );

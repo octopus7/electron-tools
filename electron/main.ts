@@ -25,6 +25,7 @@ type AppCommand =
   | "file:open"
   | "file:save"
   | "file:saveAs"
+  | "file:options"
   | "file:exit"
   | "edit:copy"
   | "edit:paste"
@@ -157,14 +158,30 @@ ipcMain.handle("window:getState", (event) => {
   };
 });
 
-ipcMain.handle("dialog:openPng", async (event) => {
+ipcMain.handle("system:getLocale", () => {
+  const [preferredLocale] = app.getPreferredSystemLanguages();
+
+  return preferredLocale ?? app.getLocale();
+});
+
+ipcMain.handle(
+  "dialog:openPng",
+  async (
+    event,
+    payload:
+      | {
+          title?: string;
+          filterName?: string;
+        }
+      | undefined
+  ) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   const options: OpenDialogOptions = {
-    title: "Open PNG",
+    title: payload?.title ?? "Open PNG",
     properties: ["openFile"],
     filters: [
       {
-        name: "PNG Images",
+        name: payload?.filterName ?? "PNG Images",
         extensions: ["png"]
       }
     ]
@@ -174,18 +191,28 @@ ipcMain.handle("dialog:openPng", async (event) => {
     : await dialog.showOpenDialog(options);
 
   return result.canceled ? null : result.filePaths[0] ?? null;
-});
+}
+);
 
 ipcMain.handle(
   "dialog:savePng",
-  async (event, payload: { defaultPath: string | null } | undefined) => {
+  async (
+    event,
+    payload:
+      | {
+          defaultPath: string | null;
+          title?: string;
+          filterName?: string;
+        }
+      | undefined
+  ) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     const options: SaveDialogOptions = {
-      title: "Save PNG",
+      title: payload?.title ?? "Save PNG",
       defaultPath: payload?.defaultPath ?? undefined,
       filters: [
         {
-          name: "PNG Images",
+          name: payload?.filterName ?? "PNG Images",
           extensions: ["png"]
         }
       ]

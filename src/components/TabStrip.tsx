@@ -1,4 +1,5 @@
 import { CloseIcon, RestoreIcon } from "../icons";
+import { useI18n } from "../i18n";
 import { formatDocumentLabel } from "../state";
 import type { DocumentWindowState } from "../types";
 
@@ -17,6 +18,8 @@ export function TabStrip({
   onClose,
   onRestore
 }: TabStripProps) {
+  const { t } = useI18n();
+
   return (
     <div className="tab-strip">
       <div className="tab-strip__tabs">
@@ -37,7 +40,7 @@ export function TabStrip({
             <button
               type="button"
               className="document-tab__close"
-              aria-label={`${document.title} \uB2EB\uAE30`}
+              aria-label={`${document.title} ${t("document.header.close")}`}
               onClick={() => onClose(document.id)}
             >
               <CloseIcon />
@@ -48,7 +51,7 @@ export function TabStrip({
 
       <button type="button" className="tab-strip__restore" onClick={onRestore}>
         <RestoreIcon />
-        <span>{"\uBB38\uC11C \uBCF5\uC6D0"}</span>
+        <span>{t("document.tab.restore")}</span>
       </button>
     </div>
   );

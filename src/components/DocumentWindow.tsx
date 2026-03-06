@@ -1,5 +1,6 @@
 import { type PointerEvent as ReactPointerEvent } from "react";
 import { CloseIcon, MaximizeIcon } from "../icons";
+import { useI18n } from "../i18n";
 import { formatDocumentLabel } from "../state";
 import type { DocumentWindowState, ToolId, ToolOptions } from "../types";
 import { DocumentCanvas } from "./DocumentCanvas";
@@ -43,6 +44,7 @@ export function DocumentWindow({
   onToggleMaximize,
   onMarkDirty
 }: DocumentWindowProps) {
+  const { t } = useI18n();
   const isFloating = layout === "floating";
   const isHidden = layout === "hidden";
   const windowStyle =
@@ -86,7 +88,7 @@ export function DocumentWindow({
             <button
               type="button"
               className="document-window__header-button"
-              aria-label={`${document.title} maximize`}
+              aria-label={`${document.title} ${t("document.header.maximize")}`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onToggleMaximize(document.id)}
             >
@@ -95,7 +97,7 @@ export function DocumentWindow({
             <button
               type="button"
               className="document-window__header-button"
-              aria-label={`${document.title} close`}
+              aria-label={`${document.title} ${t("document.header.close")}`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onClose(document.id)}
             >
@@ -110,7 +112,13 @@ export function DocumentWindow({
           <span>{formatDocumentLabel(document)}</span>
         </div>
         <div className="document-window__overlay document-window__overlay--bottom">
-          <span>{activeTool === "pencil" ? "Rust stroke pipeline" : `${activeTool} UI only`}</span>
+          <span>
+            {activeTool === "pencil"
+              ? t("document.overlay.pipeline")
+              : t("document.overlay.uiOnly", {
+                  tool: t(`toolbar.tool.${activeTool}`)
+                })}
+          </span>
         </div>
         <DocumentCanvas
           documentId={document.id}

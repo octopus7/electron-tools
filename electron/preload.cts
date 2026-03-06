@@ -16,6 +16,9 @@ import type {
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  system: {
+    getLocale: (): Promise<string> => ipcRenderer.invoke("system:getLocale")
+  },
   window: {
     minimize: () => ipcRenderer.invoke("window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
@@ -47,10 +50,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }
   },
   dialogs: {
-    openPng: (): Promise<string | null> => ipcRenderer.invoke("dialog:openPng"),
-    savePng: (defaultPath: string | null): Promise<string | null> =>
+    openPng: (payload?: { title?: string; filterName?: string }): Promise<string | null> =>
+      ipcRenderer.invoke("dialog:openPng", payload),
+    savePng: (
+      defaultPath: string | null,
+      payload?: { title?: string; filterName?: string }
+    ): Promise<string | null> =>
       ipcRenderer.invoke("dialog:savePng", {
-        defaultPath
+        defaultPath,
+        ...payload
       })
   },
   engine: {

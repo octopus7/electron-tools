@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useI18n } from "../i18n";
 import type {
   DocumentWindowState,
   Rect,
@@ -57,6 +58,7 @@ export function Workspace({
   onCloseDocument,
   onMarkDirty
 }: WorkspaceProps) {
+  const { t } = useI18n();
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const interactionRef = useRef<InteractionState | null>(null);
   const lastSizeRef = useRef<WorkspaceSize>({
@@ -142,8 +144,8 @@ export function Workspace({
     <section className={`workspace workspace--${workspaceMode}`} ref={workspaceRef}>
       {documents.length === 0 ? (
         <div className="workspace__empty-state">
-          <strong>No documents open.</strong>
-          <p>Use File &gt; New or Ctrl+N to create a document.</p>
+          <strong>{t("workspace.empty.title")}</strong>
+          <p>{t("workspace.empty.body")}</p>
         </div>
       ) : null}
 
