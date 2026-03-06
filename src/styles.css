@@ -63,8 +63,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
-  padding-left: 16px;
+  height: 38px;
+  padding-left: 12px;
   background: linear-gradient(180deg, rgba(20, 30, 39, 0.98), rgba(14, 21, 28, 0.96));
   app-region: drag;
   -webkit-app-region: drag;
@@ -84,21 +84,23 @@ button {
 }
 
 .titlebar__brand {
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
 .titlebar__glyph {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, rgba(255, 179, 71, 0.22), rgba(90, 171, 231, 0.16));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  width: 20px;
+  height: 20px;
+  color: #6db8ff;
 }
 
-.titlebar__glyph svg,
+.titlebar__glyph svg {
+  width: 20px;
+  height: 20px;
+}
+
 .tool-button svg {
   width: 22px;
   height: 22px;
@@ -106,15 +108,16 @@ button {
 
 .titlebar__copy {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
-.titlebar__eyebrow {
+.titlebar__name {
   font-size: 11px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.48);
+  color: rgba(147, 187, 221, 0.82);
 }
 
 .titlebar__title,
@@ -125,8 +128,13 @@ button {
   white-space: nowrap;
 }
 
+.titlebar__divider {
+  color: rgba(255, 255, 255, 0.24);
+}
+
 .titlebar__title {
-  font-size: 13px;
+  font-size: 12px;
+  color: rgba(233, 240, 248, 0.9);
 }
 
 .titlebar__window-actions {
@@ -145,7 +153,7 @@ button {
 }
 
 .caption-button {
-  width: 48px;
+  width: 44px;
   height: 100%;
   transition: background-color 120ms ease;
 }
@@ -162,21 +170,27 @@ button {
 .document-window__header-button svg,
 .document-tab__close svg,
 .tab-strip__restore svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .menu-bar {
   position: relative;
+  min-height: 42px;
+  padding: 0 14px;
+  overflow: visible;
+  background: linear-gradient(180deg, rgba(18, 28, 37, 0.92), rgba(15, 23, 31, 0.9));
+  z-index: 70;
+}
+
+.menu-bar__scroller {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
   min-height: 42px;
-  padding: 0 14px;
   overflow-x: auto;
   overflow-y: hidden;
-  background: linear-gradient(180deg, rgba(18, 28, 37, 0.92), rgba(15, 23, 31, 0.9));
   scrollbar-width: none;
 }
 
@@ -217,10 +231,8 @@ button {
 }
 
 .menu-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 60;
+  position: fixed;
+  z-index: 120;
   min-width: 250px;
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -230,7 +242,7 @@ button {
   backdrop-filter: blur(14px);
 }
 
-.menu-bar::-webkit-scrollbar {
+.menu-bar__scroller::-webkit-scrollbar {
   display: none;
 }
 

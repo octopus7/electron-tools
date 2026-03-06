@@ -25,12 +25,12 @@ type MenuDefinition = {
 const menuDefinitions: MenuDefinition[] = [
   {
     id: "file",
-    label: "파일",
+    label: "\uD30C\uC77C",
     entries: [
       {
         kind: "item",
         id: "file-new",
-        label: "새로 만들기",
+        label: "\uC0C8\uB85C \uB9CC\uB4E4\uAE30",
         command: "file:new",
         accelerator: "Ctrl+N"
       },
@@ -41,21 +41,21 @@ const menuDefinitions: MenuDefinition[] = [
       {
         kind: "item",
         id: "file-open",
-        label: "오픈",
+        label: "\uC624\uD508",
         command: "file:open",
         accelerator: "Ctrl+O"
       },
       {
         kind: "item",
         id: "file-save",
-        label: "저장",
+        label: "\uC800\uC7A5",
         command: "file:save",
         accelerator: "Ctrl+S"
       },
       {
         kind: "item",
         id: "file-save-as",
-        label: "다른 이름으로 저장",
+        label: "\uB2E4\uB978 \uC774\uB984\uC73C\uB85C \uC800\uC7A5",
         command: "file:saveAs"
       },
       {
@@ -65,26 +65,26 @@ const menuDefinitions: MenuDefinition[] = [
       {
         kind: "item",
         id: "file-exit",
-        label: "종료",
+        label: "\uC885\uB8CC",
         command: "file:exit"
       }
     ]
   },
   {
     id: "edit",
-    label: "편집",
+    label: "\uD3B8\uC9D1",
     entries: [
       {
         kind: "item",
         id: "edit-copy",
-        label: "복사하기",
+        label: "\uBCF5\uC0AC\uD558\uAE30",
         command: "edit:copy",
         accelerator: "Ctrl+C"
       },
       {
         kind: "item",
         id: "edit-paste",
-        label: "붙여넣기",
+        label: "\uBD99\uC5EC\uB123\uAE30",
         command: "edit:paste",
         accelerator: "Ctrl+V"
       }
@@ -101,9 +101,20 @@ type MenuBarProps = {
   onCommand: (command: AppCommand) => void;
 };
 
+type PopoverPosition = {
+  top: number;
+  left: number;
+};
+
 export function MenuBar({ onCommand }: MenuBarProps) {
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenu = menuDefinitions.find(
+    (menu) => menu.id === activeMenuId && menu.entries && menu.entries.length > 0
+  );
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -123,8 +134,28 @@ export function MenuBar({ onCommand }: MenuBarProps) {
 
   useEffect(() => {
     if (!activeMenuId) {
+      setPopoverPosition(null);
       return;
     }
+
+    const currentMenuId = activeMenuId;
+
+    function updatePopoverPosition() {
+      const trigger = triggerRefs.current[currentMenuId];
+
+      if (!trigger) {
+        setPopoverPosition(null);
+        return;
+      }
+
+      const bounds = trigger.getBoundingClientRect();
+      setPopoverPosition({
+        top: bounds.bottom + 8,
+        left: bounds.left
+      });
+    }
+
+    updatePopoverPosition();
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -133,72 +164,89 @@ export function MenuBar({ onCommand }: MenuBarProps) {
     }
 
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePopoverPosition);
+    scrollerRef.current?.addEventListener("scroll", updatePopoverPosition, {
+      passive: true
+    });
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePopoverPosition);
+      scrollerRef.current?.removeEventListener("scroll", updatePopoverPosition);
     };
   }, [activeMenuId]);
 
   return (
     <div className="menu-bar" ref={menuRef}>
-      {menuDefinitions.map((menu) => {
-        const isOpen = menu.id === activeMenuId;
-        const hasEntries = Boolean(menu.entries);
+      <div className="menu-bar__scroller" ref={scrollerRef}>
+        {menuDefinitions.map((menu) => {
+          const isOpen = menu.id === activeMenuId;
+          const hasEntries = Boolean(menu.entries);
 
-        return (
-          <div
-            key={menu.id}
-            className="menu-bar__group"
-            onMouseEnter={() => {
-              if (activeMenuId && hasEntries) {
-                setActiveMenuId(menu.id);
-              }
-            }}
-          >
-            <button
-              type="button"
-              className={`menu-bar__trigger ${isOpen ? "is-open" : ""}`}
-              onClick={() => {
-                if (menu.command) {
-                  setActiveMenuId(null);
-                  onCommand(menu.command);
-                  return;
+          return (
+            <div
+              key={menu.id}
+              className="menu-bar__group"
+              onMouseEnter={() => {
+                if (activeMenuId && hasEntries) {
+                  setActiveMenuId(menu.id);
                 }
-
-                setActiveMenuId(isOpen ? null : menu.id);
               }}
             >
-              <span>{menu.label}</span>
-              {hasEntries ? <ChevronDownIcon /> : <InfoIcon />}
-            </button>
-
-            {isOpen && menu.entries ? (
-              <div className="menu-popover">
-                {menu.entries.map((entry) => {
-                  if (entry.kind === "separator") {
-                    return <div key={entry.id} className="menu-popover__separator" />;
+              <button
+                ref={(element) => {
+                  triggerRefs.current[menu.id] = element;
+                }}
+                type="button"
+                className={`menu-bar__trigger ${isOpen ? "is-open" : ""}`}
+                onClick={() => {
+                  if (menu.command) {
+                    setActiveMenuId(null);
+                    onCommand(menu.command);
+                    return;
                   }
 
-                  return (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      className="menu-popover__item"
-                      onClick={() => {
-                        setActiveMenuId(null);
-                        onCommand(entry.command);
-                      }}
-                    >
-                      <span>{entry.label}</span>
-                      <span className="menu-popover__accelerator">{entry.accelerator ?? ""}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
+                  setActiveMenuId(isOpen ? null : menu.id);
+                }}
+              >
+                <span>{menu.label}</span>
+                {hasEntries ? <ChevronDownIcon /> : <InfoIcon />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {activeMenu?.entries && popoverPosition ? (
+        <div
+          className="menu-popover"
+          style={{
+            top: popoverPosition.top,
+            left: popoverPosition.left
+          }}
+        >
+          {activeMenu.entries.map((entry) => {
+            if (entry.kind === "separator") {
+              return <div key={entry.id} className="menu-popover__separator" />;
+            }
+
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                className="menu-popover__item"
+                onClick={() => {
+                  setActiveMenuId(null);
+                  onCommand(entry.command);
+                }}
+              >
+                <span>{entry.label}</span>
+                <span className="menu-popover__accelerator">{entry.accelerator ?? ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

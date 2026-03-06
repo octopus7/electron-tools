@@ -37,7 +37,7 @@ export function TabStrip({
             <button
               type="button"
               className="document-tab__close"
-              aria-label={`${document.title} 닫기`}
+              aria-label={`${document.title} \uB2EB\uAE30`}
               onClick={() => onClose(document.id)}
             >
               <CloseIcon />
@@ -46,13 +46,9 @@ export function TabStrip({
         ))}
       </div>
 
-      <button
-        type="button"
-        className="tab-strip__restore"
-        onClick={onRestore}
-      >
+      <button type="button" className="tab-strip__restore" onClick={onRestore}>
         <RestoreIcon />
-        <span>문서 복원</span>
+        <span>{"\uBB38\uC11C \uBCF5\uC6D0"}</span>
       </button>
     </div>
   );

@@ -1,3 +1,4 @@
+import type { DirtyDisplayTile } from "../shared/engine-protocol";
 import type {
   DocumentWindowState,
   Rect,
@@ -45,6 +46,17 @@ export type AppAction =
       type: "create-document";
     }
   | {
+      type: "open-document";
+      document: {
+        id: string;
+        title: string;
+        width: number;
+        height: number;
+        filePath: string;
+        initialDisplayTiles: DirtyDisplayTile[];
+      };
+    }
+  | {
       type: "activate-document";
       id: string;
     }
@@ -72,6 +84,13 @@ export type AppAction =
   | {
       type: "mark-document-dirty";
       id: string;
+      dirty: boolean;
+    }
+  | {
+      type: "sync-document-file";
+      id: string;
+      title: string;
+      filePath: string;
       dirty: boolean;
     };
 
@@ -126,6 +145,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         activeDocumentId: nextDocument.id,
         workspaceMode: state.workspaceMode,
         nextDocumentNumber: state.nextDocumentNumber + 1,
+        nextZIndex: state.nextZIndex + 1
+      };
+    }
+    case "open-document": {
+      const nextDocument = createLoadedDocument(
+        action.document,
+        state.workspaceSize,
+        state.nextZIndex
+      );
+
+      return {
+        ...state,
+        documents: [...state.documents, nextDocument],
+        activeDocumentId: nextDocument.id,
         nextZIndex: state.nextZIndex + 1
       };
     }
@@ -233,6 +266,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : document
         )
       };
+    case "sync-document-file":
+      return {
+        ...state,
+        documents: state.documents.map((document) =>
+          document.id === action.id
+            ? {
+                ...document,
+                title: action.title,
+                filePath: action.filePath,
+                dirty: action.dirty
+              }
+            : document
+        )
+      };
     default:
       return state;
   }
@@ -255,7 +302,7 @@ export function formatDocumentLabel(
 ): string {
   const dirtyPrefix = document.dirty ? "* " : "";
 
-  return `${dirtyPrefix}${document.title} · ${document.width}x${document.height}`;
+  return `${dirtyPrefix}${document.title} - ${document.width}x${document.height}`;
 }
 
 function focusDocument(state: AppState, id: string): AppState {
@@ -309,7 +356,50 @@ function createDocument(
     width: DEFAULT_IMAGE_WIDTH,
     height: DEFAULT_IMAGE_HEIGHT,
     background: "#ffffff",
+    filePath: null,
     dirty: false,
+    surfaceBootstrap: {
+      kind: "blank"
+    },
+    frame,
+    zIndex
+  };
+}
+
+function createLoadedDocument(
+  document: {
+    id: string;
+    title: string;
+    width: number;
+    height: number;
+    filePath: string;
+    initialDisplayTiles: DirtyDisplayTile[];
+  },
+  workspaceSize: WorkspaceSize,
+  zIndex: number
+): DocumentWindowState {
+  const frame = clampDocumentFrame(
+    {
+      x: 56,
+      y: 48,
+      width: Math.min(DEFAULT_FRAME_WIDTH, document.width + 120),
+      height: Math.min(DEFAULT_FRAME_HEIGHT, document.height + 120)
+    },
+    workspaceSize
+  );
+
+  return {
+    id: document.id,
+    title: document.title,
+    width: document.width,
+    height: document.height,
+    background: "#00000000",
+    filePath: document.filePath,
+    dirty: false,
+    surfaceBootstrap: {
+      kind: "loaded",
+      initialDisplayTiles: document.initialDisplayTiles
+    },
     frame,
     zIndex
   };

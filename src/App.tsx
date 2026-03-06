@@ -5,28 +5,28 @@ import { TitleBar } from "./components/TitleBar";
 import { Toolbar } from "./components/Toolbar";
 import { Workspace } from "./components/Workspace";
 import { appReducer, createInitialState, formatDocumentLabel } from "./state";
-import type { AppCommand } from "./types";
+import type { AppCommand, DocumentWindowState } from "./types";
 
 type ToastState = {
   id: number;
   message: string;
 };
 
-const commandMessages: Record<Exclude<AppCommand, "file:new" | "file:exit">, string> = {
-  "file:open": "Open is still a placeholder. Wire this command to file dialogs next.",
-  "file:save": "Save is still a placeholder. The Rust document model is ready for persistence next.",
-  "file:saveAs": "Save As is still a placeholder.",
-  "edit:copy": "Copy is not connected yet.",
-  "edit:paste": "Paste is not connected yet.",
-  "help:about": "Electron Tools with Rust stroke engine prototype"
-};
+const commandMessages: Record<Exclude<AppCommand, "file:new" | "file:open" | "file:save" | "file:saveAs" | "file:exit">, string> =
+  {
+    "edit:copy": "Copy is not connected yet.",
+    "edit:paste": "Paste is not connected yet.",
+    "help:about": "Electron Tools with Rust stroke engine prototype"
+  };
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastIdRef = useRef(0);
-  const commandHandlerRef = useRef<(command: AppCommand) => void>(() => undefined);
+  const commandHandlerRef = useRef<(command: AppCommand) => Promise<void>>(async () => undefined);
+  const activeDocument =
+    state.documents.find((document) => document.id === state.activeDocumentId) ?? null;
 
   function pushToast(message: string) {
     toastIdRef.current += 1;
@@ -36,7 +36,7 @@ export default function App() {
     });
   }
 
-  commandHandlerRef.current = (command: AppCommand) => {
+  commandHandlerRef.current = async (command: AppCommand) => {
     if (command === "file:new") {
       dispatch({
         type: "create-document"
@@ -44,13 +44,78 @@ export default function App() {
       return;
     }
 
+    if (command === "file:open") {
+      const api = getElectronApi();
+      const filePath = await api.dialogs.openPng();
+
+      if (!filePath) {
+        return;
+      }
+
+      const result = await api.engine.loadPng({
+        documentId: createRendererDocumentId(),
+        path: filePath
+      });
+
+      dispatch({
+        type: "open-document",
+        document: {
+          id: result.documentId,
+          title: result.title,
+          width: result.width,
+          height: result.height,
+          filePath: result.filePath,
+          initialDisplayTiles: result.dirtyDisplayTiles
+        }
+      });
+      return;
+    }
+
+    if (command === "file:save" || command === "file:saveAs") {
+      if (!activeDocument) {
+        pushToast("No document is active.");
+        return;
+      }
+
+      const api = getElectronApi();
+      const shouldPrompt = command === "file:saveAs" || !activeDocument.filePath;
+      const chosenPath = shouldPrompt
+        ? await api.dialogs.savePng(buildDefaultSavePath(activeDocument))
+        : activeDocument.filePath;
+
+      if (!chosenPath) {
+        return;
+      }
+
+      const result = await api.engine.savePng({
+        documentId: activeDocument.id,
+        path: chosenPath
+      });
+
+      dispatch({
+        type: "sync-document-file",
+        id: result.documentId,
+        title: result.title,
+        filePath: result.filePath,
+        dirty: result.documentDirty
+      });
+      pushToast(`Saved ${result.title}`);
+      return;
+    }
+
     if (command === "file:exit") {
-      void window.electronAPI?.window.close();
+      await window.electronAPI?.window.close();
       return;
     }
 
     pushToast(commandMessages[command]);
   };
+
+  function executeCommand(command: AppCommand) {
+    void commandHandlerRef.current(command).catch((error) => {
+      pushToast(getErrorMessage(error));
+    });
+  }
 
   useEffect(() => {
     if (!window.electronAPI) {
@@ -69,7 +134,7 @@ export default function App() {
       setWindowMaximized(stateSnapshot.isMaximized);
     });
     const unsubscribeCommands = window.electronAPI.commands.onExecute((command) => {
-      commandHandlerRef.current(command);
+      executeCommand(command);
     });
 
     return () => {
@@ -93,9 +158,6 @@ export default function App() {
     };
   }, [toast]);
 
-  const activeDocument =
-    state.documents.find((document) => document.id === state.activeDocumentId) ?? null;
-
   return (
     <div className="app-shell">
       <TitleBar
@@ -116,7 +178,7 @@ export default function App() {
 
       <MenuBar
         onCommand={(command) => {
-          commandHandlerRef.current(command);
+          executeCommand(command);
         }}
       />
 
@@ -220,4 +282,39 @@ export default function App() {
       ) : null}
     </div>
   );
+}
+
+function getElectronApi() {
+  if (!window.electronAPI) {
+    throw new Error("Electron bridge is unavailable.");
+  }
+
+  return window.electronAPI;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function createRendererDocumentId(): string {
+  if ("randomUUID" in crypto) {
+    return `document-${crypto.randomUUID()}`;
+  }
+
+  return `document-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildDefaultSavePath(document: DocumentWindowState): string {
+  if (document.filePath) {
+    return document.filePath;
+  }
+
+  return `${sanitizeFileStem(document.title)}.png`;
+}
+
+function sanitizeFileStem(value: string): string {
+  const trimmed = value.trim().replace(/\.png$/i, "");
+  const sanitized = trimmed.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
+
+  return sanitized || "Untitled";
 }

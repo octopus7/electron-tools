@@ -118,6 +118,7 @@ export function DocumentWindow({
           height={document.height}
           background={document.background}
           dirty={document.dirty}
+          surfaceBootstrap={document.surfaceBootstrap}
           activeTool={activeTool}
           toolOptions={toolOptions}
           onActivate={() => onActivate(document.id)}

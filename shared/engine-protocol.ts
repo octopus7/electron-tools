@@ -37,6 +37,23 @@ export type EngineMutationResult = {
   documentDirty: boolean;
 };
 
+export type LoadedDocumentResult = {
+  documentId: string;
+  title: string;
+  width: number;
+  height: number;
+  filePath: string;
+  dirtyDisplayTiles: DirtyDisplayTile[];
+  documentDirty: boolean;
+};
+
+export type SaveDocumentResult = {
+  documentId: string;
+  title: string;
+  filePath: string;
+  documentDirty: boolean;
+};
+
 export type CreateDocumentRequest = {
   documentId: string;
   width: number;
@@ -46,6 +63,16 @@ export type CreateDocumentRequest = {
 
 export type CloseDocumentRequest = {
   documentId: string;
+};
+
+export type LoadPngRequest = {
+  documentId: string;
+  path: string;
+};
+
+export type SavePngRequest = {
+  documentId: string;
+  path: string;
 };
 
 export type BeginStrokeRequest = {

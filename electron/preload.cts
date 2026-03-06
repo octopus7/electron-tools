@@ -6,7 +6,11 @@ import type {
   CreateDocumentRequest,
   EngineMutationResult,
   EngineStatus,
-  EndStrokeRequest
+  EndStrokeRequest,
+  LoadPngRequest,
+  LoadedDocumentResult,
+  SaveDocumentResult,
+  SavePngRequest
 } from "../shared/engine-protocol";
 
 const { contextBridge, ipcRenderer } = require("electron");
@@ -42,12 +46,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
       };
     }
   },
+  dialogs: {
+    openPng: (): Promise<string | null> => ipcRenderer.invoke("dialog:openPng"),
+    savePng: (defaultPath: string | null): Promise<string | null> =>
+      ipcRenderer.invoke("dialog:savePng", {
+        defaultPath
+      })
+  },
   engine: {
     getStatus: (): Promise<EngineStatus> => ipcRenderer.invoke("engine:getStatus"),
     createDocument: (payload: CreateDocumentRequest): Promise<EngineMutationResult> =>
       ipcRenderer.invoke("engine:createDocument", payload),
     closeDocument: (payload: CloseDocumentRequest): Promise<EngineMutationResult> =>
       ipcRenderer.invoke("engine:closeDocument", payload),
+    loadPng: (payload: LoadPngRequest): Promise<LoadedDocumentResult> =>
+      ipcRenderer.invoke("engine:loadPng", payload),
+    savePng: (payload: SavePngRequest): Promise<SaveDocumentResult> =>
+      ipcRenderer.invoke("engine:savePng", payload),
     beginStroke: (payload: BeginStrokeRequest): Promise<EngineMutationResult> =>
       ipcRenderer.invoke("engine:beginStroke", payload),
     appendStrokePoints: (payload: AppendStrokePointsRequest): Promise<EngineMutationResult> =>

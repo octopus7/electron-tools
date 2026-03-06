@@ -22,7 +22,10 @@ export function TitleBar({
           <AppGlyph />
         </div>
         <div className="titlebar__copy">
-          <span className="titlebar__eyebrow">Electron Tools</span>
+          <span className="titlebar__name">Electron Tools</span>
+          <span className="titlebar__divider" aria-hidden="true">
+            /
+          </span>
           <span className="titlebar__title">{activeDocumentLabel}</span>
         </div>
       </div>
@@ -31,7 +34,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button"
-          aria-label="최소화"
+          aria-label="Minimize window"
           onClick={onMinimize}
         >
           <MinimizeIcon />
@@ -39,7 +42,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button"
-          aria-label={isWindowMaximized ? "복원" : "최대화"}
+          aria-label={isWindowMaximized ? "Restore window" : "Maximize window"}
           onClick={onToggleMaximize}
         >
           {isWindowMaximized ? <RestoreIcon /> : <MaximizeIcon />}
@@ -47,7 +50,7 @@ export function TitleBar({
         <button
           type="button"
           className="caption-button caption-button--close"
-          aria-label="닫기"
+          aria-label="Close window"
           onClick={onClose}
         >
           <CloseIcon />

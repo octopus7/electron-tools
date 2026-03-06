@@ -1,7 +1,10 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use image::{load_from_memory_with_format, save_buffer_with_format, ColorType, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 
 const TILE_SIZE: usize = 128;
 
@@ -31,18 +34,39 @@ fn handle_request_line(engine: &mut EngineState, line: &str) -> ResponseEnvelope
         }
     };
 
-    let result = match envelope.request {
-        EngineRequest::CreateDocument(payload) => engine.create_document(payload),
-        EngineRequest::CloseDocument(payload) => engine.close_document(payload),
-        EngineRequest::BeginStroke(payload) => engine.begin_stroke(payload),
-        EngineRequest::AppendStrokePoints(payload) => engine.append_stroke_points(payload),
-        EngineRequest::EndStroke(payload) => engine.end_stroke(payload),
-        EngineRequest::CancelStroke(payload) => engine.cancel_stroke(payload),
-    };
-
-    match result {
-        Ok(result) => ResponseEnvelope::ok(envelope.id, result),
-        Err(error) => ResponseEnvelope::error(envelope.id, error),
+    match envelope.request {
+        EngineRequest::CreateDocument(payload) => match engine.create_document(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::CloseDocument(payload) => match engine.close_document(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::LoadPng(payload) => match engine.load_png(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::SavePng(payload) => match engine.save_png(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::BeginStroke(payload) => match engine.begin_stroke(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::AppendStrokePoints(payload) => match engine.append_stroke_points(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::EndStroke(payload) => match engine.end_stroke(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
+        EngineRequest::CancelStroke(payload) => match engine.cancel_stroke(payload) {
+            Ok(result) => ResponseEnvelope::ok(envelope.id, result),
+            Err(error) => ResponseEnvelope::error(envelope.id, error),
+        },
     }
 }
 
@@ -70,6 +94,62 @@ impl EngineState {
 
         Ok(EngineMutationResult {
             dirty_display_tiles: Vec::new(),
+            document_dirty: false,
+        })
+    }
+
+    fn load_png(&mut self, payload: LoadPngRequest) -> Result<LoadedDocumentResult, String> {
+        let bytes = fs::read(&payload.path)
+            .map_err(|error| format!("failed to read PNG \"{}\": {error}", payload.path))?;
+        let image = load_from_memory_with_format(&bytes, ImageFormat::Png)
+            .map_err(|error| format!("failed to decode PNG \"{}\": {error}", payload.path))?;
+        let rgba = image.to_rgba8();
+        let width = rgba.width() as usize;
+        let height = rgba.height() as usize;
+
+        if width == 0 || height == 0 {
+            return Err("PNG must have non-zero dimensions".to_string());
+        }
+
+        let document = DocumentState::from_pixels(width, height, rgba.into_raw());
+        let updates = document.compose_display_tiles(document.all_tile_coords(), None);
+
+        self.documents.insert(payload.document_id.clone(), document);
+
+        Ok(LoadedDocumentResult {
+            document_id: payload.document_id.clone(),
+            title: title_from_path(&payload.path),
+            width,
+            height,
+            file_path: payload.path.clone(),
+            dirty_display_tiles: with_document_id(&payload.document_id, updates),
+            document_dirty: false,
+        })
+    }
+
+    fn save_png(&mut self, payload: SavePngRequest) -> Result<SaveDocumentResult, String> {
+        let document = self
+            .documents
+            .get_mut(&payload.document_id)
+            .ok_or_else(|| "document not found".to_string())?;
+        let composed = document.compose_full_display_pixels();
+
+        save_buffer_with_format(
+            &payload.path,
+            &composed,
+            document.width as u32,
+            document.height as u32,
+            ColorType::Rgba8,
+            ImageFormat::Png,
+        )
+        .map_err(|error| format!("failed to save PNG \"{}\": {error}", payload.path))?;
+
+        document.dirty = false;
+
+        Ok(SaveDocumentResult {
+            document_id: payload.document_id,
+            title: title_from_path(&payload.path),
+            file_path: payload.path,
             document_dirty: false,
         })
     }
@@ -207,10 +287,14 @@ impl DocumentState {
             pixel.copy_from_slice(&background);
         }
 
+        Self::from_pixels(width, height, base_pixels)
+    }
+
+    fn from_pixels(width: usize, height: usize, pixels: Vec<u8>) -> Self {
         Self {
             width,
             height,
-            layers: vec![Layer::new(base_pixels, BlendMode::Normal, 1.0)],
+            layers: vec![Layer::new(pixels, BlendMode::Normal, 1.0)],
             active_layer_index: 0,
             stroke_session: None,
             dirty: false,
@@ -354,6 +438,20 @@ impl DocumentState {
         mix_tiles(snapshot, &working, session.brush.opacity)
     }
 
+    fn compose_full_display_pixels(&self) -> Vec<u8> {
+        let mut composed = vec![0; self.width * self.height * 4];
+
+        for layer in &self.layers {
+            if !layer.visible {
+                continue;
+            }
+
+            composite_layer_tile(&mut composed, &layer.pixels, layer.opacity, layer.blend_mode);
+        }
+
+        composed
+    }
+
     fn write_active_layer_tile(&mut self, tile: &TileCoord, tile_pixels: &[u8]) {
         write_tile(
             &mut self.layers[self.active_layer_index].pixels,
@@ -457,17 +555,18 @@ enum StrokeTool {
 struct StrokeBrushParams {
     size: u32,
     opacity: u8,
-    flow: u8,
-    dab_spacing: u8,
+    #[serde(rename = "flow")]
+    _flow: u8,
+    #[serde(rename = "dabSpacing")]
+    _dab_spacing: u8,
     color: [u8; 4],
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 enum BlendMode {
     Normal,
     Multiply,
-    Screen,
-    Overlay,
 }
 
 #[derive(Deserialize)]
@@ -482,6 +581,8 @@ struct RequestEnvelope {
 enum EngineRequest {
     CreateDocument(CreateDocumentRequest),
     CloseDocument(CloseDocumentRequest),
+    LoadPng(LoadPngRequest),
+    SavePng(SavePngRequest),
     BeginStroke(BeginStrokeRequest),
     AppendStrokePoints(AppendStrokePointsRequest),
     EndStroke(EndStrokeRequest),
@@ -493,17 +594,17 @@ struct ResponseEnvelope {
     id: u64,
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<EngineMutationResult>,
+    result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
 
 impl ResponseEnvelope {
-    fn ok(id: u64, result: EngineMutationResult) -> Self {
+    fn ok<T: Serialize>(id: u64, result: T) -> Self {
         Self {
             id,
             ok: true,
-            result: Some(result),
+            result: Some(serde_json::to_value(result).expect("response result must serialize")),
             error: None,
         }
     }
@@ -531,6 +632,20 @@ struct CreateDocumentRequest {
 #[serde(rename_all = "camelCase")]
 struct CloseDocumentRequest {
     document_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadPngRequest {
+    document_id: String,
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavePngRequest {
+    document_id: String,
+    path: String,
 }
 
 #[derive(Deserialize)]
@@ -574,6 +689,27 @@ struct EngineMutationResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LoadedDocumentResult {
+    document_id: String,
+    title: String,
+    width: usize,
+    height: usize,
+    file_path: String,
+    dirty_display_tiles: Vec<DisplayTileUpdate>,
+    document_dirty: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveDocumentResult {
+    document_id: String,
+    title: String,
+    file_path: String,
+    document_dirty: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DisplayTileUpdate {
     document_id: String,
     tile_x: usize,
@@ -591,6 +727,14 @@ fn with_document_id(document_id: &str, mut updates: Vec<DisplayTileUpdate>) -> V
     }
 
     updates
+}
+
+fn title_from_path(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "Untitled.png".to_string())
 }
 
 fn tile_dimensions(width: usize, height: usize, tile: TileCoord) -> (usize, usize) {
@@ -709,14 +853,6 @@ fn blend_channel(source: f32, destination: f32, blend_mode: BlendMode) -> f32 {
     match blend_mode {
         BlendMode::Normal => source,
         BlendMode::Multiply => source * destination,
-        BlendMode::Screen => 1.0 - ((1.0 - source) * (1.0 - destination)),
-        BlendMode::Overlay => {
-            if destination <= 0.5 {
-                2.0 * source * destination
-            } else {
-                1.0 - (2.0 * (1.0 - source) * (1.0 - destination))
-            }
-        }
     }
 }
 
@@ -775,19 +911,32 @@ fn parse_hex_color(value: &str) -> Result<[u8; 4], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn brush(opacity: u8) -> StrokeBrushParams {
         StrokeBrushParams {
             size: 1,
             opacity,
-            flow: 100,
-            dab_spacing: 12,
+            _flow: 100,
+            _dab_spacing: 12,
             color: [0, 0, 0, 255],
         }
     }
 
     fn point(x: i32, y: i32) -> StrokePoint {
         StrokePoint { x, y }
+    }
+
+    fn unique_temp_png_path(stem: &str) -> String {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+
+        std::env::temp_dir()
+            .join(format!("electron-tools-{stem}-{suffix}.png"))
+            .to_string_lossy()
+            .into_owned()
     }
 
     #[test]
@@ -838,7 +987,7 @@ mod tests {
 
     #[test]
     fn touched_tiles_snapshot_is_copy_on_write() {
-        let mut document = DocumentState::new(256, 256, [255, 255, 255, 255]);
+        let document = DocumentState::new(256, 256, [255, 255, 255, 255]);
         let mut session = StrokeSession::new(StrokeTool::Pencil, 1, brush(40), point(4, 4));
 
         let touched = document.apply_points_to_session(&mut session, &[point(4, 4)]).unwrap();
@@ -903,5 +1052,59 @@ mod tests {
         let index = ((1 * updates[0].width) + 1) * 4;
 
         assert_eq!(&bytes[index..index + 4], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn save_and_load_png_round_trip_preserves_pixels() {
+        let mut engine = EngineState::default();
+        let save_path = unique_temp_png_path("round-trip");
+
+        engine
+            .create_document(CreateDocumentRequest {
+                document_id: "doc".into(),
+                width: 8,
+                height: 8,
+                background: "#ffffff".into(),
+            })
+            .unwrap();
+
+        engine
+            .begin_stroke(BeginStrokeRequest {
+                document_id: "doc".into(),
+                tool: StrokeTool::Pencil,
+                pointer_id: 1,
+                brush: brush(100),
+                point: point(3, 3),
+            })
+            .unwrap();
+
+        engine
+            .end_stroke(EndStrokeRequest {
+                document_id: "doc".into(),
+                pointer_id: 1,
+            })
+            .unwrap();
+
+        engine
+            .save_png(SavePngRequest {
+                document_id: "doc".into(),
+                path: save_path.clone(),
+            })
+            .unwrap();
+
+        let loaded = engine
+            .load_png(LoadPngRequest {
+                document_id: "loaded".into(),
+                path: save_path.clone(),
+            })
+            .unwrap();
+        let document = engine.documents.get("loaded").unwrap();
+        let index = ((3 * document.width) + 3) * 4;
+
+        assert_eq!(loaded.width, 8);
+        assert_eq!(loaded.height, 8);
+        assert_eq!(&document.layers[0].pixels[index..index + 4], &[0, 0, 0, 255]);
+
+        let _ = fs::remove_file(save_path);
     }
 }

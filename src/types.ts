@@ -1,4 +1,8 @@
-import type { StrokePoint, StrokeTool } from "../shared/engine-protocol";
+import type {
+  DirtyDisplayTile,
+  StrokePoint,
+  StrokeTool
+} from "../shared/engine-protocol";
 
 export type AppCommand =
   | "file:new"
@@ -33,13 +37,24 @@ export type ToolOptions = {
   dabSpacing: number;
 };
 
+export type DocumentSurfaceBootstrap =
+  | {
+      kind: "blank";
+    }
+  | {
+      kind: "loaded";
+      initialDisplayTiles: DirtyDisplayTile[];
+    };
+
 export type DocumentModel = {
   id: string;
   title: string;
   width: number;
   height: number;
   background: string;
+  filePath: string | null;
   dirty: boolean;
+  surfaceBootstrap: DocumentSurfaceBootstrap;
 };
 
 export type DocumentWindowState = DocumentModel & {

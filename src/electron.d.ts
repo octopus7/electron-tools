@@ -7,7 +7,11 @@ import type {
   CreateDocumentRequest,
   EngineMutationResult,
   EngineStatus,
-  EndStrokeRequest
+  EndStrokeRequest,
+  LoadPngRequest,
+  LoadedDocumentResult,
+  SaveDocumentResult,
+  SavePngRequest
 } from "../shared/engine-protocol";
 
 export type WindowStatePayload = {
@@ -25,10 +29,16 @@ export interface ElectronAPI {
   commands: {
     onExecute: (callback: (command: AppCommand) => void) => () => void;
   };
+  dialogs: {
+    openPng: () => Promise<string | null>;
+    savePng: (defaultPath: string | null) => Promise<string | null>;
+  };
   engine: {
     getStatus: () => Promise<EngineStatus>;
     createDocument: (payload: CreateDocumentRequest) => Promise<EngineMutationResult>;
     closeDocument: (payload: CloseDocumentRequest) => Promise<EngineMutationResult>;
+    loadPng: (payload: LoadPngRequest) => Promise<LoadedDocumentResult>;
+    savePng: (payload: SavePngRequest) => Promise<SaveDocumentResult>;
     beginStroke: (payload: BeginStrokeRequest) => Promise<EngineMutationResult>;
     appendStrokePoints: (payload: AppendStrokePointsRequest) => Promise<EngineMutationResult>;
     endStroke: (payload: EndStrokeRequest) => Promise<EngineMutationResult>;

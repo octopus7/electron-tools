@@ -11,7 +11,11 @@ import type {
   CreateDocumentRequest,
   EngineMutationResult,
   EngineStatus,
-  EndStrokeRequest
+  EndStrokeRequest,
+  LoadPngRequest,
+  LoadedDocumentResult,
+  SaveDocumentResult,
+  SavePngRequest
 } from "../shared/engine-protocol.js";
 
 type EngineRequestPayload =
@@ -22,6 +26,14 @@ type EngineRequestPayload =
   | {
       type: "closeDocument";
       payload: CloseDocumentRequest;
+    }
+  | {
+      type: "loadPng";
+      payload: LoadPngRequest;
+    }
+  | {
+      type: "savePng";
+      payload: SavePngRequest;
     }
   | {
       type: "beginStroke";
@@ -49,12 +61,12 @@ type EngineEnvelope = {
 type EngineResponseEnvelope = {
   id: number;
   ok: boolean;
-  result?: EngineMutationResult;
+  result?: unknown;
   error?: string;
 };
 
 type PendingRequest = {
-  resolve: (value: EngineMutationResult) => void;
+  resolve: (value: any) => void;
   reject: (error: Error) => void;
 };
 
@@ -84,6 +96,20 @@ export class EngineManager {
   async closeDocument(payload: CloseDocumentRequest): Promise<EngineMutationResult> {
     return this.request({
       type: "closeDocument",
+      payload
+    });
+  }
+
+  async loadPng(payload: LoadPngRequest): Promise<LoadedDocumentResult> {
+    return this.request({
+      type: "loadPng",
+      payload
+    });
+  }
+
+  async savePng(payload: SavePngRequest): Promise<SaveDocumentResult> {
+    return this.request({
+      type: "savePng",
       payload
     });
   }
@@ -122,14 +148,14 @@ export class EngineManager {
     this.failPendingRequests("Engine process was disposed.");
   }
 
-  private async request(payload: EngineRequestPayload): Promise<EngineMutationResult> {
+  private async request<TResult>(payload: EngineRequestPayload): Promise<TResult> {
     await this.ensureStarted();
 
     if (!this.child || !this.status.available) {
       throw new Error(this.status.detail ?? "Rust engine is unavailable.");
     }
 
-    return new Promise<EngineMutationResult>((resolve, reject) => {
+    return new Promise<TResult>((resolve, reject) => {
       const id = this.nextRequestId++;
       const envelope: EngineEnvelope = {
         id,
@@ -199,7 +225,7 @@ export class EngineManager {
 
         this.pendingRequests.delete(response.id);
 
-        if (response.ok && response.result) {
+        if (response.ok && response.result !== undefined) {
           pendingRequest.resolve(response.result);
           return;
         }
@@ -249,7 +275,8 @@ export class EngineManager {
 }
 
 function resolveEngineBinaryPath(appPath: string): string | null {
-  const executableName = process.platform === "win32" ? "electron-tools-engine.exe" : "electron-tools-engine";
+  const executableName =
+    process.platform === "win32" ? "electron-tools-engine.exe" : "electron-tools-engine";
   const candidates = [
     path.join(appPath, "native", "engine", "target", "debug", executableName),
     path.join(appPath, "native", "engine", "target", "release", executableName)

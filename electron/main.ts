@@ -1,4 +1,11 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  type OpenDialogOptions,
+  type SaveDialogOptions
+} from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EngineManager } from "./engine.js";
@@ -8,7 +15,9 @@ import type {
   CancelStrokeRequest,
   CloseDocumentRequest,
   CreateDocumentRequest,
-  EndStrokeRequest
+  EndStrokeRequest,
+  LoadPngRequest,
+  SavePngRequest
 } from "../shared/engine-protocol.js";
 
 type AppCommand =
@@ -148,12 +157,63 @@ ipcMain.handle("window:getState", (event) => {
   };
 });
 
+ipcMain.handle("dialog:openPng", async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const options: OpenDialogOptions = {
+    title: "Open PNG",
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "PNG Images",
+        extensions: ["png"]
+      }
+    ]
+  };
+  const result = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+
+  return result.canceled ? null : result.filePaths[0] ?? null;
+});
+
+ipcMain.handle(
+  "dialog:savePng",
+  async (event, payload: { defaultPath: string | null } | undefined) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options: SaveDialogOptions = {
+      title: "Save PNG",
+      defaultPath: payload?.defaultPath ?? undefined,
+      filters: [
+        {
+          name: "PNG Images",
+          extensions: ["png"]
+        }
+      ]
+    };
+    const result = window
+      ? await dialog.showSaveDialog(window, options)
+      : await dialog.showSaveDialog(options);
+
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+
+    return ensurePngFilePath(result.filePath);
+  }
+);
+
 ipcMain.handle("engine:getStatus", async () => engineManager.getStatus());
 ipcMain.handle("engine:createDocument", async (_event, payload: CreateDocumentRequest) =>
   engineManager.createDocument(payload)
 );
 ipcMain.handle("engine:closeDocument", async (_event, payload: CloseDocumentRequest) =>
   engineManager.closeDocument(payload)
+);
+ipcMain.handle("engine:loadPng", async (_event, payload: LoadPngRequest) =>
+  engineManager.loadPng(payload)
+);
+ipcMain.handle("engine:savePng", async (_event, payload: SavePngRequest) =>
+  engineManager.savePng(payload)
 );
 ipcMain.handle("engine:beginStroke", async (_event, payload: BeginStrokeRequest) =>
   engineManager.beginStroke(payload)
@@ -167,3 +227,13 @@ ipcMain.handle("engine:endStroke", async (_event, payload: EndStrokeRequest) =>
 ipcMain.handle("engine:cancelStroke", async (_event, payload: CancelStrokeRequest) =>
   engineManager.cancelStroke(payload)
 );
+
+function ensurePngFilePath(filePath: string): string {
+  if (/\.png$/i.test(filePath)) {
+    return filePath;
+  }
+
+  const parsed = path.parse(filePath);
+
+  return path.join(parsed.dir, `${parsed.name}.png`);
+}

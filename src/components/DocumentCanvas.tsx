@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type MutableRefObject
+} from "react";
 import type {
   DirtyDisplayTile,
   EngineMutationResult,
@@ -6,7 +12,12 @@ import type {
   StrokePoint
 } from "../../shared/engine-protocol";
 import { isStrokeTool } from "../state";
-import type { RendererStrokeSession, ToolId, ToolOptions } from "../types";
+import type {
+  DocumentSurfaceBootstrap,
+  RendererStrokeSession,
+  ToolId,
+  ToolOptions
+} from "../types";
 
 type DocumentCanvasProps = {
   documentId: string;
@@ -14,6 +25,7 @@ type DocumentCanvasProps = {
   height: number;
   background: string;
   dirty: boolean;
+  surfaceBootstrap: DocumentSurfaceBootstrap;
   activeTool: ToolId;
   toolOptions: ToolOptions;
   onActivate: () => void;
@@ -31,6 +43,7 @@ export function DocumentCanvas({
   height,
   background,
   dirty,
+  surfaceBootstrap,
   activeTool,
   toolOptions,
   onActivate,
@@ -55,52 +68,61 @@ export function DocumentCanvas({
     const version = documentVersionRef.current;
 
     strokeRef.current = null;
-    clearStrokeFrameQueue();
+    clearStrokeFrameQueue(strokeRef);
     resetCanvas(canvasRef.current, width, height, background);
-    setSurfaceState({
-      ready: false,
-      detail: "Connecting to Rust engine..."
-    });
 
-    queueEngineRequest(async () => {
-      const api = window.electronAPI;
-
-      if (!api) {
-        throw new Error("Electron bridge is unavailable.");
-      }
-
-      const status = await api.engine.getStatus();
-
-      if (!status?.available) {
-        throw new Error(status?.detail ?? "Rust engine is unavailable.");
-      }
-
-      const result = await api.engine.createDocument({
-        documentId,
-        width,
-        height,
-        background
-      });
-
-      if (documentVersionRef.current !== version) {
-        return;
-      }
-
-      applyMutationResult(result);
+    if (surfaceBootstrap.kind === "loaded") {
+      drawTileUpdates(canvasRef.current, documentId, surfaceBootstrap.initialDisplayTiles);
       setSurfaceState({
         ready: true,
         detail: null
       });
-    }).catch((error) => {
-      if (documentVersionRef.current !== version) {
-        return;
-      }
-
+    } else {
       setSurfaceState({
         ready: false,
-        detail: error instanceof Error ? error.message : String(error)
+        detail: "Connecting to Rust engine..."
       });
-    });
+
+      queueEngineRequest(requestChainRef, async () => {
+        const api = window.electronAPI;
+
+        if (!api) {
+          throw new Error("Electron bridge is unavailable.");
+        }
+
+        const status = await api.engine.getStatus();
+
+        if (!status?.available) {
+          throw new Error(status?.detail ?? "Rust engine is unavailable.");
+        }
+
+        const result = await api.engine.createDocument({
+          documentId,
+          width,
+          height,
+          background
+        });
+
+        if (documentVersionRef.current !== version) {
+          return;
+        }
+
+        applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+        setSurfaceState({
+          ready: true,
+          detail: null
+        });
+      }).catch((error) => {
+        if (documentVersionRef.current !== version) {
+          return;
+        }
+
+        setSurfaceState({
+          ready: false,
+          detail: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
 
     return () => {
       documentVersionRef.current += 1;
@@ -111,14 +133,7 @@ export function DocumentCanvas({
         })
         .catch(() => undefined);
     };
-  }, [background, documentId, height, width]);
-
-  function queueEngineRequest(task: () => Promise<void>) {
-    const next = requestChainRef.current.then(task, task);
-    requestChainRef.current = next.catch(() => undefined);
-
-    return next;
-  }
+  }, [background, documentId, height, surfaceBootstrap, width]);
 
   async function sendQueuedPoints(pointerId: number, points: StrokePoint[]) {
     if (points.length === 0) {
@@ -131,36 +146,7 @@ export function DocumentCanvas({
       points
     });
 
-    applyMutationResult(result);
-  }
-
-  function applyMutationResult(result: EngineMutationResult) {
-    drawTileUpdates(result.dirtyDisplayTiles);
-
-    if (result.documentDirty && !dirtyRef.current) {
-      dirtyRef.current = true;
-      onMarkDirty(documentId);
-    }
-  }
-
-  function drawTileUpdates(updates: DirtyDisplayTile[]) {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d");
-
-    if (!canvas || !context) {
-      return;
-    }
-
-    for (const update of updates) {
-      if (update.documentId !== documentId) {
-        continue;
-      }
-
-      const bytes = decodeBase64(update.pixelsBase64);
-      const imageData = context.createImageData(update.width, update.height);
-      imageData.data.set(bytes);
-      context.putImageData(imageData, update.x, update.y);
-    }
+    applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
   }
 
   function beginStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -187,7 +173,7 @@ export function DocumentCanvas({
       rafId: null
     };
 
-    queueEngineRequest(async () => {
+    queueEngineRequest(requestChainRef, async () => {
       const result = await window.electronAPI!.engine.beginStroke({
         documentId,
         pointerId: event.pointerId,
@@ -196,7 +182,7 @@ export function DocumentCanvas({
         point
       });
 
-      applyMutationResult(result);
+      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
     }).catch((error) => {
       setSurfaceState({
         ready: false,
@@ -245,7 +231,7 @@ export function DocumentCanvas({
       return;
     }
 
-    await queueEngineRequest(async () => {
+    await queueEngineRequest(requestChainRef, async () => {
       await sendQueuedPoints(stroke.pointerId, points);
     }).catch((error) => {
       setSurfaceState({
@@ -270,7 +256,7 @@ export function DocumentCanvas({
       canvas.releasePointerCapture(pointerId);
     }
 
-    void queueEngineRequest(async () => {
+    void queueEngineRequest(requestChainRef, async () => {
       await sendQueuedPoints(pointerId, queuedPoints);
 
       const result = await window.electronAPI!.engine.endStroke({
@@ -278,7 +264,7 @@ export function DocumentCanvas({
         pointerId
       });
 
-      applyMutationResult(result);
+      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
       strokeRef.current = null;
     }).catch((error) => {
       strokeRef.current = null;
@@ -301,47 +287,22 @@ export function DocumentCanvas({
       canvas.releasePointerCapture(stroke.pointerId);
     }
 
-    clearStrokeFrameQueue();
+    clearStrokeFrameQueue(strokeRef);
     strokeRef.current = null;
 
-    void queueEngineRequest(async () => {
+    void queueEngineRequest(requestChainRef, async () => {
       const result = await window.electronAPI!.engine.cancelStroke({
         documentId,
         pointerId: event.pointerId
       });
 
-      applyMutationResult(result);
+      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
     }).catch((error) => {
       setSurfaceState({
         ready: false,
         detail: error instanceof Error ? error.message : String(error)
       });
     });
-  }
-
-  function clearStrokeFrameQueue() {
-    const stroke = strokeRef.current;
-
-    if (stroke && stroke.rafId !== null) {
-      window.cancelAnimationFrame(stroke.rafId);
-      stroke.rafId = null;
-    }
-  }
-
-  function takeQueuedPoints(stroke: RendererStrokeSession): StrokePoint[] {
-    if (stroke.rafId !== null) {
-      window.cancelAnimationFrame(stroke.rafId);
-      stroke.rafId = null;
-    }
-
-    if (stroke.queuedPoints.length === 0) {
-      return [];
-    }
-
-    const points = [...stroke.queuedPoints];
-    stroke.queuedPoints.length = 0;
-
-    return points;
   }
 
   return (
@@ -359,7 +320,7 @@ export function DocumentCanvas({
         onPointerCancel={abortStroke}
         onLostPointerCapture={() => {
           strokeRef.current = null;
-          clearStrokeFrameQueue();
+          clearStrokeFrameQueue(strokeRef);
         }}
       />
       {surfaceState.detail ? (
@@ -381,6 +342,54 @@ function createBrushParams(toolOptions: ToolOptions): StrokeBrushParams {
     dabSpacing: toolOptions.dabSpacing,
     color: [16, 20, 27, 255]
   };
+}
+
+function queueEngineRequest(
+  requestChainRef: MutableRefObject<Promise<void>>,
+  task: () => Promise<void>
+) {
+  const next = requestChainRef.current.then(task, task);
+  requestChainRef.current = next.catch(() => undefined);
+
+  return next;
+}
+
+function applyMutationResult(
+  documentId: string,
+  canvas: HTMLCanvasElement | null,
+  dirtyRef: MutableRefObject<boolean>,
+  onMarkDirty: (id: string) => void,
+  result: EngineMutationResult
+) {
+  drawTileUpdates(canvas, documentId, result.dirtyDisplayTiles);
+
+  if (result.documentDirty && !dirtyRef.current) {
+    dirtyRef.current = true;
+    onMarkDirty(documentId);
+  }
+}
+
+function drawTileUpdates(
+  canvas: HTMLCanvasElement | null,
+  documentId: string,
+  updates: DirtyDisplayTile[]
+) {
+  const context = canvas?.getContext("2d");
+
+  if (!canvas || !context) {
+    return;
+  }
+
+  for (const update of updates) {
+    if (update.documentId !== documentId) {
+      continue;
+    }
+
+    const bytes = decodeBase64(update.pixelsBase64);
+    const imageData = context.createImageData(update.width, update.height);
+    imageData.data.set(bytes);
+    context.putImageData(imageData, update.x, update.y);
+  }
 }
 
 function getCanvasPoint(
@@ -428,9 +437,40 @@ function resetCanvas(
   }
 
   context.clearRect(0, 0, width, height);
-  context.fillStyle = background;
-  context.fillRect(0, 0, width, height);
+
+  if (background !== "#00000000") {
+    context.fillStyle = background;
+    context.fillRect(0, 0, width, height);
+  }
+
   context.imageSmoothingEnabled = false;
+}
+
+function clearStrokeFrameQueue(
+  strokeRef: MutableRefObject<RendererStrokeSession | null>
+) {
+  const stroke = strokeRef.current;
+
+  if (stroke && stroke.rafId !== null) {
+    window.cancelAnimationFrame(stroke.rafId);
+    stroke.rafId = null;
+  }
+}
+
+function takeQueuedPoints(stroke: RendererStrokeSession): StrokePoint[] {
+  if (stroke.rafId !== null) {
+    window.cancelAnimationFrame(stroke.rafId);
+    stroke.rafId = null;
+  }
+
+  if (stroke.queuedPoints.length === 0) {
+    return [];
+  }
+
+  const points = [...stroke.queuedPoints];
+  stroke.queuedPoints.length = 0;
+
+  return points;
 }
 
 function cancelStroke(canvas: HTMLCanvasElement | null) {
