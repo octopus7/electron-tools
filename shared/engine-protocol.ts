@@ -32,9 +32,25 @@ export type DirtyDisplayTile = {
   pixelsBase64: string;
 };
 
+export type StrokeFramePhase = "begin" | "append" | "end" | "cancel";
+
+export type EnginePerformanceStageKey = "strokeInput" | "strokeCommit" | "displayTiles";
+
+export type EnginePerformanceStage = {
+  key: EnginePerformanceStageKey;
+  durationMs: number;
+};
+
+export type EngineFramePerformance = {
+  phase: StrokeFramePhase;
+  stageTimings: EnginePerformanceStage[];
+  engineTotalMs: number;
+};
+
 export type EngineMutationResult = {
   dirtyDisplayTiles: DirtyDisplayTile[];
   documentDirty: boolean;
+  framePerformance: EngineFramePerformance | null;
 };
 
 export type LoadedDocumentResult = {

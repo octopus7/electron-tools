@@ -1,6 +1,9 @@
 import type {
   DirtyDisplayTile,
+  EngineFramePerformance,
+  EnginePerformanceStageKey,
   StrokePoint,
+  StrokeFramePhase,
   StrokeTool
 } from "../shared/engine-protocol";
 
@@ -13,6 +16,7 @@ export type AppCommand =
   | "file:exit"
   | "edit:copy"
   | "edit:paste"
+  | "view:togglePerformance"
   | "help:about";
 
 export type ToolId = "zoom" | StrokeTool;
@@ -69,3 +73,53 @@ export type RendererStrokeSession = {
   queuedPoints: StrokePoint[];
   rafId: number | null;
 };
+
+export type RendererPerformanceStageKey = "rendererApply";
+
+export type PerformanceStageKey = EnginePerformanceStageKey | RendererPerformanceStageKey;
+
+export type StrokeFramePerformanceSample = {
+  documentId: string;
+  documentTitle: string;
+  phase: StrokeFramePhase;
+  stageTimings: Array<{
+    key: PerformanceStageKey;
+    durationMs: number;
+  }>;
+  engineTotalMs: number;
+  frameTimeMs: number;
+  fps: number;
+  dirtyTileCount: number;
+  updatedAt: number;
+};
+
+export type MutationPerformanceContext = {
+  documentId: string;
+  documentTitle: string;
+};
+
+export function toStrokeFramePerformanceSample(
+  context: MutationPerformanceContext,
+  performance: EngineFramePerformance,
+  rendererApplyMs: number,
+  frameTimeMs: number,
+  dirtyTileCount: number
+): StrokeFramePerformanceSample {
+  return {
+    documentId: context.documentId,
+    documentTitle: context.documentTitle,
+    phase: performance.phase,
+    stageTimings: [
+      ...performance.stageTimings,
+      {
+        key: "rendererApply",
+        durationMs: rendererApplyMs
+      }
+    ],
+    engineTotalMs: performance.engineTotalMs,
+    frameTimeMs,
+    fps: frameTimeMs > 0 ? 1000 / frameTimeMs : 0,
+    dirtyTileCount,
+    updatedAt: Date.now()
+  };
+}

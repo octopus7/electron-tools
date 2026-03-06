@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { MenuBar } from "./components/MenuBar";
+import { PerformancePanel } from "./components/PerformancePanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { TabStrip } from "./components/TabStrip";
 import { TitleBar } from "./components/TitleBar";
@@ -23,7 +24,7 @@ import {
   readStoredTheme,
   type AppTheme
 } from "./theme";
-import type { AppCommand, DocumentWindowState } from "./types";
+import type { AppCommand, DocumentWindowState, StrokeFramePerformanceSample } from "./types";
 
 type ToastState = {
   id: number;
@@ -109,6 +110,9 @@ function AppShell({
     createInitialState
   );
   const [windowMaximized, setWindowMaximized] = useState(false);
+  const [performancePanelOpen, setPerformancePanelOpen] = useState(false);
+  const [latestPerformanceSample, setLatestPerformanceSample] =
+    useState<StrokeFramePerformanceSample | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastIdRef = useRef(0);
@@ -228,6 +232,11 @@ function AppShell({
       return;
     }
 
+    if (command === "view:togglePerformance") {
+      setPerformancePanelOpen((current) => !current);
+      return;
+    }
+
     pushToast(t("toast.about"));
   };
 
@@ -297,6 +306,9 @@ function AppShell({
       />
 
       <MenuBar
+        checkedCommands={{
+          "view:togglePerformance": performancePanelOpen
+        }}
         onCommand={(command) => {
           executeCommand(command);
         }}
@@ -393,7 +405,19 @@ function AppShell({
             dirty: true
           });
         }}
+        onPerformanceSample={(sample) => {
+          setLatestPerformanceSample(sample);
+        }}
       />
+
+      {performancePanelOpen ? (
+        <PerformancePanel
+          sample={latestPerformanceSample}
+          onClose={() => {
+            setPerformancePanelOpen(false);
+          }}
+        />
+      ) : null}
 
       <SettingsDialog
         open={settingsOpen}

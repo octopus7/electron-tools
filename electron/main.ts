@@ -29,6 +29,7 @@ type AppCommand =
   | "file:exit"
   | "edit:copy"
   | "edit:paste"
+  | "view:togglePerformance"
   | "help:about";
 
 const acceleratorMap = new Map<string, AppCommand>([

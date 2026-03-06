@@ -10,6 +10,8 @@ type MenuEntry =
       labelKey: TranslationKey;
       command: AppCommand;
       accelerator?: string;
+      checkable?: boolean;
+      checked?: boolean;
     }
   | {
       kind: "separator";
@@ -23,93 +25,9 @@ type MenuDefinition = {
   command?: AppCommand;
 };
 
-const menuDefinitions: MenuDefinition[] = [
-  {
-    id: "file",
-    labelKey: "menu.file",
-    entries: [
-      {
-        kind: "item",
-        id: "file-new",
-        labelKey: "menu.file.new",
-        command: "file:new",
-        accelerator: "Ctrl+N"
-      },
-      {
-        kind: "separator",
-        id: "file-separator-1"
-      },
-      {
-        kind: "item",
-        id: "file-open",
-        labelKey: "menu.file.open",
-        command: "file:open",
-        accelerator: "Ctrl+O"
-      },
-      {
-        kind: "item",
-        id: "file-save",
-        labelKey: "menu.file.save",
-        command: "file:save",
-        accelerator: "Ctrl+S"
-      },
-      {
-        kind: "item",
-        id: "file-save-as",
-        labelKey: "menu.file.saveAs",
-        command: "file:saveAs"
-      },
-      {
-        kind: "separator",
-        id: "file-separator-2"
-      },
-      {
-        kind: "item",
-        id: "file-options",
-        labelKey: "menu.file.options",
-        command: "file:options"
-      },
-      {
-        kind: "separator",
-        id: "file-separator-3"
-      },
-      {
-        kind: "item",
-        id: "file-exit",
-        labelKey: "menu.file.exit",
-        command: "file:exit"
-      }
-    ]
-  },
-  {
-    id: "edit",
-    labelKey: "menu.edit",
-    entries: [
-      {
-        kind: "item",
-        id: "edit-copy",
-        labelKey: "menu.edit.copy",
-        command: "edit:copy",
-        accelerator: "Ctrl+C"
-      },
-      {
-        kind: "item",
-        id: "edit-paste",
-        labelKey: "menu.edit.paste",
-        command: "edit:paste",
-        accelerator: "Ctrl+V"
-      }
-    ]
-  },
-  {
-    id: "about",
-    labelKey: "menu.about",
-    command: "help:about"
-  }
-];
-
 type MenuBarProps = {
   onCommand: (command: AppCommand) => void;
+  checkedCommands: Partial<Record<AppCommand, boolean>>;
 };
 
 type PopoverPosition = {
@@ -117,13 +35,111 @@ type PopoverPosition = {
   left: number;
 };
 
-export function MenuBar({ onCommand }: MenuBarProps) {
+export function MenuBar({ onCommand, checkedCommands }: MenuBarProps) {
   const { t } = useI18n();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const menuDefinitions: MenuDefinition[] = [
+    {
+      id: "file",
+      labelKey: "menu.file",
+      entries: [
+        {
+          kind: "item",
+          id: "file-new",
+          labelKey: "menu.file.new",
+          command: "file:new",
+          accelerator: "Ctrl+N"
+        },
+        {
+          kind: "separator",
+          id: "file-separator-1"
+        },
+        {
+          kind: "item",
+          id: "file-open",
+          labelKey: "menu.file.open",
+          command: "file:open",
+          accelerator: "Ctrl+O"
+        },
+        {
+          kind: "item",
+          id: "file-save",
+          labelKey: "menu.file.save",
+          command: "file:save",
+          accelerator: "Ctrl+S"
+        },
+        {
+          kind: "item",
+          id: "file-save-as",
+          labelKey: "menu.file.saveAs",
+          command: "file:saveAs"
+        },
+        {
+          kind: "separator",
+          id: "file-separator-2"
+        },
+        {
+          kind: "item",
+          id: "file-options",
+          labelKey: "menu.file.options",
+          command: "file:options"
+        },
+        {
+          kind: "separator",
+          id: "file-separator-3"
+        },
+        {
+          kind: "item",
+          id: "file-exit",
+          labelKey: "menu.file.exit",
+          command: "file:exit"
+        }
+      ]
+    },
+    {
+      id: "edit",
+      labelKey: "menu.edit",
+      entries: [
+        {
+          kind: "item",
+          id: "edit-copy",
+          labelKey: "menu.edit.copy",
+          command: "edit:copy",
+          accelerator: "Ctrl+C"
+        },
+        {
+          kind: "item",
+          id: "edit-paste",
+          labelKey: "menu.edit.paste",
+          command: "edit:paste",
+          accelerator: "Ctrl+V"
+        }
+      ]
+    },
+    {
+      id: "view",
+      labelKey: "menu.view",
+      entries: [
+        {
+          kind: "item",
+          id: "view-performance",
+          labelKey: "menu.view.performance",
+          command: "view:togglePerformance",
+          checkable: true,
+          checked: Boolean(checkedCommands["view:togglePerformance"])
+        }
+      ]
+    },
+    {
+      id: "about",
+      labelKey: "menu.about",
+      command: "help:about"
+    }
+  ];
   const activeMenu = menuDefinitions.find(
     (menu) => menu.id === activeMenuId && menu.entries && menu.entries.length > 0
   );
@@ -252,7 +268,14 @@ export function MenuBar({ onCommand }: MenuBarProps) {
                   onCommand(entry.command);
                 }}
               >
-                <span>{t(entry.labelKey)}</span>
+                <span className="menu-popover__label">
+                  {entry.checkable ? (
+                    <span className="menu-popover__checkmark-slot" aria-hidden="true">
+                      {entry.checked ? "\u2713" : ""}
+                    </span>
+                  ) : null}
+                  <span>{t(entry.labelKey)}</span>
+                </span>
                 <span className="menu-popover__accelerator">{entry.accelerator ?? ""}</span>
               </button>
             );

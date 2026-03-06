@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import type {
   DocumentWindowState,
   Rect,
+  StrokeFramePerformanceSample,
   ToolId,
   ToolOptions,
   WorkspaceMode,
@@ -22,6 +23,7 @@ type WorkspaceProps = {
   onToggleMaximize: (id: string) => void;
   onCloseDocument: (id: string) => void;
   onMarkDirty: (id: string) => void;
+  onPerformanceSample: (sample: StrokeFramePerformanceSample) => void;
 };
 
 type InteractionState =
@@ -56,7 +58,8 @@ export function Workspace({
   onUpdateDocumentFrame,
   onToggleMaximize,
   onCloseDocument,
-  onMarkDirty
+  onMarkDirty,
+  onPerformanceSample
 }: WorkspaceProps) {
   const { t } = useI18n();
   const workspaceRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +208,7 @@ export function Workspace({
             onClose={onCloseDocument}
             onToggleMaximize={onToggleMaximize}
             onMarkDirty={onMarkDirty}
+            onPerformanceSample={onPerformanceSample}
           />
         );
       })}

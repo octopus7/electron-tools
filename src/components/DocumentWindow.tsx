@@ -2,7 +2,12 @@ import { type PointerEvent as ReactPointerEvent } from "react";
 import { CloseIcon, MaximizeIcon } from "../icons";
 import { useI18n } from "../i18n";
 import { formatDocumentLabel } from "../state";
-import type { DocumentWindowState, ToolId, ToolOptions } from "../types";
+import type {
+  DocumentWindowState,
+  StrokeFramePerformanceSample,
+  ToolId,
+  ToolOptions
+} from "../types";
 import { DocumentCanvas } from "./DocumentCanvas";
 
 export type ResizeHandle = "n" | "e" | "s" | "w" | "ne" | "nw" | "se" | "sw";
@@ -27,6 +32,7 @@ type DocumentWindowProps = {
   onClose: (id: string) => void;
   onToggleMaximize: (id: string) => void;
   onMarkDirty: (id: string) => void;
+  onPerformanceSample: (sample: StrokeFramePerformanceSample) => void;
 };
 
 const resizeHandles: ResizeHandle[] = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
@@ -42,7 +48,8 @@ export function DocumentWindow({
   onResizeHandlePointerDown,
   onClose,
   onToggleMaximize,
-  onMarkDirty
+  onMarkDirty,
+  onPerformanceSample
 }: DocumentWindowProps) {
   const { t } = useI18n();
   const isFloating = layout === "floating";
@@ -111,17 +118,9 @@ export function DocumentWindow({
         <div className="document-window__overlay document-window__overlay--top">
           <span>{formatDocumentLabel(document)}</span>
         </div>
-        <div className="document-window__overlay document-window__overlay--bottom">
-          <span>
-            {activeTool === "pencil"
-              ? t("document.overlay.pipeline")
-              : t("document.overlay.uiOnly", {
-                  tool: t(`toolbar.tool.${activeTool}`)
-                })}
-          </span>
-        </div>
         <DocumentCanvas
           documentId={document.id}
+          documentTitle={document.title}
           width={document.width}
           height={document.height}
           background={document.background}
@@ -131,6 +130,7 @@ export function DocumentWindow({
           toolOptions={toolOptions}
           onActivate={() => onActivate(document.id)}
           onMarkDirty={onMarkDirty}
+          onPerformanceSample={onPerformanceSample}
         />
       </div>
 

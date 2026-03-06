@@ -14,14 +14,18 @@ import type {
 import { isStrokeTool } from "../state";
 import type {
   DocumentSurfaceBootstrap,
+  MutationPerformanceContext,
   RendererStrokeSession,
+  StrokeFramePerformanceSample,
   ToolId,
   ToolOptions
 } from "../types";
+import { toStrokeFramePerformanceSample } from "../types";
 import { useI18n } from "../i18n";
 
 type DocumentCanvasProps = {
   documentId: string;
+  documentTitle: string;
   width: number;
   height: number;
   background: string;
@@ -31,6 +35,7 @@ type DocumentCanvasProps = {
   toolOptions: ToolOptions;
   onActivate: () => void;
   onMarkDirty: (id: string) => void;
+  onPerformanceSample: (sample: StrokeFramePerformanceSample) => void;
 };
 
 type SurfaceState = {
@@ -40,6 +45,7 @@ type SurfaceState = {
 
 export function DocumentCanvas({
   documentId,
+  documentTitle,
   width,
   height,
   background,
@@ -48,7 +54,8 @@ export function DocumentCanvas({
   activeTool,
   toolOptions,
   onActivate,
-  onMarkDirty
+  onMarkDirty,
+  onPerformanceSample
 }: DocumentCanvasProps) {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -137,18 +144,46 @@ export function DocumentCanvas({
     };
   }, [background, documentId, height, surfaceBootstrap, width]);
 
-  async function sendQueuedPoints(pointerId: number, points: StrokePoint[]) {
+  async function requestQueuedPoints(pointerId: number, points: StrokePoint[]) {
     if (points.length === 0) {
-      return;
+      return null;
     }
 
-    const result = await window.electronAPI!.engine.appendStrokePoints({
+    return window.electronAPI!.engine.appendStrokePoints({
       documentId,
       pointerId,
       points
     });
+  }
+
+  function applyMeasuredMutationResult(
+    context: MutationPerformanceContext,
+    frameStartedAt: number,
+    result: EngineMutationResult
+  ) {
+    const rendererApplyStartedAt = performance.now();
 
     applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+
+    const rendererApplyMs = performance.now() - rendererApplyStartedAt;
+
+    if (!result.framePerformance) {
+      return;
+    }
+
+    const framePerformance = result.framePerformance;
+
+    void waitForNextFrame().then(() => {
+      onPerformanceSample(
+        toStrokeFramePerformanceSample(
+          context,
+          framePerformance,
+          rendererApplyMs,
+          performance.now() - frameStartedAt,
+          result.dirtyDisplayTiles.length
+        )
+      );
+    });
   }
 
   function beginStroke(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -176,6 +211,7 @@ export function DocumentCanvas({
     };
 
     queueEngineRequest(requestChainRef, async () => {
+      const frameStartedAt = performance.now();
       const result = await window.electronAPI!.engine.beginStroke({
         documentId,
         pointerId: event.pointerId,
@@ -184,7 +220,14 @@ export function DocumentCanvas({
         point
       });
 
-      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+      applyMeasuredMutationResult(
+        {
+          documentId,
+          documentTitle
+        },
+        frameStartedAt,
+        result
+      );
     }).catch((error) => {
       setSurfaceState({
         ready: false,
@@ -234,7 +277,21 @@ export function DocumentCanvas({
     }
 
     await queueEngineRequest(requestChainRef, async () => {
-      await sendQueuedPoints(stroke.pointerId, points);
+      const frameStartedAt = performance.now();
+      const result = await requestQueuedPoints(stroke.pointerId, points);
+
+      if (!result) {
+        return;
+      }
+
+      applyMeasuredMutationResult(
+        {
+          documentId,
+          documentTitle
+        },
+        frameStartedAt,
+        result
+      );
     }).catch((error) => {
       setSurfaceState({
         ready: false,
@@ -259,14 +316,36 @@ export function DocumentCanvas({
     }
 
     void queueEngineRequest(requestChainRef, async () => {
-      await sendQueuedPoints(pointerId, queuedPoints);
+      if (queuedPoints.length > 0) {
+        const appendFrameStartedAt = performance.now();
+        const appendResult = await requestQueuedPoints(pointerId, queuedPoints);
 
+        if (appendResult) {
+          applyMeasuredMutationResult(
+            {
+              documentId,
+              documentTitle
+            },
+            appendFrameStartedAt,
+            appendResult
+          );
+        }
+      }
+
+      const frameStartedAt = performance.now();
       const result = await window.electronAPI!.engine.endStroke({
         documentId,
         pointerId
       });
 
-      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+      applyMeasuredMutationResult(
+        {
+          documentId,
+          documentTitle
+        },
+        frameStartedAt,
+        result
+      );
       strokeRef.current = null;
     }).catch((error) => {
       strokeRef.current = null;
@@ -293,12 +372,20 @@ export function DocumentCanvas({
     strokeRef.current = null;
 
     void queueEngineRequest(requestChainRef, async () => {
+      const frameStartedAt = performance.now();
       const result = await window.electronAPI!.engine.cancelStroke({
         documentId,
         pointerId: event.pointerId
       });
 
-      applyMutationResult(documentId, canvasRef.current, dirtyRef, onMarkDirty, result);
+      applyMeasuredMutationResult(
+        {
+          documentId,
+          documentTitle
+        },
+        frameStartedAt,
+        result
+      );
     }).catch((error) => {
       setSurfaceState({
         ready: false,
@@ -354,6 +441,14 @@ function queueEngineRequest(
   requestChainRef.current = next.catch(() => undefined);
 
   return next;
+}
+
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      resolve();
+    });
+  });
 }
 
 function applyMutationResult(

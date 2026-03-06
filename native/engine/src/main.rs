@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
+use std::time::Instant;
 
 const TILE_SIZE: usize = 128;
 
@@ -86,6 +87,7 @@ impl EngineState {
         Ok(EngineMutationResult {
             dirty_display_tiles: with_document_id(&payload.document_id, updates),
             document_dirty: false,
+            frame_performance: None,
         })
     }
 
@@ -95,6 +97,7 @@ impl EngineState {
         Ok(EngineMutationResult {
             dirty_display_tiles: Vec::new(),
             document_dirty: false,
+            frame_performance: None,
         })
     }
 
@@ -155,6 +158,7 @@ impl EngineState {
     }
 
     fn begin_stroke(&mut self, payload: BeginStrokeRequest) -> Result<EngineMutationResult, String> {
+        let frame_start = Instant::now();
         let document = self
             .documents
             .get_mut(&payload.document_id)
@@ -167,13 +171,25 @@ impl EngineState {
             payload.point,
         );
 
+        let stroke_input_start = Instant::now();
         let touched_tiles = document.apply_points_to_session(&mut session, &[payload.point])?;
+        let stroke_input_ms = duration_ms(stroke_input_start.elapsed());
+        let display_tiles_start = Instant::now();
         let updates = document.compose_display_tiles(touched_tiles, Some(&session));
+        let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
         document.stroke_session = Some(session);
 
         Ok(EngineMutationResult {
             dirty_display_tiles: with_document_id(&payload.document_id, updates),
             document_dirty: true,
+            frame_performance: Some(FramePerformance {
+                phase: StrokeFramePhase::Begin,
+                stage_timings: vec![
+                    frame_stage(PerformanceStageKey::StrokeInput, stroke_input_ms),
+                    frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                ],
+                engine_total_ms: duration_ms(frame_start.elapsed()),
+            }),
         })
     }
 
@@ -181,6 +197,7 @@ impl EngineState {
         &mut self,
         payload: AppendStrokePointsRequest,
     ) -> Result<EngineMutationResult, String> {
+        let frame_start = Instant::now();
         let document = self
             .documents
             .get_mut(&payload.document_id)
@@ -190,6 +207,7 @@ impl EngineState {
             return Ok(EngineMutationResult {
                 dirty_display_tiles: Vec::new(),
                 document_dirty: document.dirty,
+                frame_performance: None,
             });
         }
 
@@ -203,17 +221,30 @@ impl EngineState {
             return Err("pointer id does not match active stroke".to_string());
         }
 
+        let stroke_input_start = Instant::now();
         let touched_tiles = document.apply_points_to_session(&mut session, &payload.points)?;
+        let stroke_input_ms = duration_ms(stroke_input_start.elapsed());
+        let display_tiles_start = Instant::now();
         let updates = document.compose_display_tiles(touched_tiles, Some(&session));
+        let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
         document.stroke_session = Some(session);
 
         Ok(EngineMutationResult {
             dirty_display_tiles: with_document_id(&payload.document_id, updates),
             document_dirty: true,
+            frame_performance: Some(FramePerformance {
+                phase: StrokeFramePhase::Append,
+                stage_timings: vec![
+                    frame_stage(PerformanceStageKey::StrokeInput, stroke_input_ms),
+                    frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                ],
+                engine_total_ms: duration_ms(frame_start.elapsed()),
+            }),
         })
     }
 
     fn end_stroke(&mut self, payload: EndStrokeRequest) -> Result<EngineMutationResult, String> {
+        let frame_start = Instant::now();
         let document = self
             .documents
             .get_mut(&payload.document_id)
@@ -231,21 +262,34 @@ impl EngineState {
 
         let touched_tiles = session.touched_tiles.clone();
 
+        let stroke_commit_start = Instant::now();
         for tile in &touched_tiles {
             let tile_pixels = document.compose_active_layer_tile(tile, Some(&session));
             document.write_active_layer_tile(tile, &tile_pixels);
         }
+        let stroke_commit_ms = duration_ms(stroke_commit_start.elapsed());
 
         document.dirty = document.dirty || !touched_tiles.is_empty();
+        let display_tiles_start = Instant::now();
         let updates = document.compose_display_tiles(touched_tiles, None);
+        let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
 
         Ok(EngineMutationResult {
             dirty_display_tiles: with_document_id(&payload.document_id, updates),
             document_dirty: document.dirty,
+            frame_performance: Some(FramePerformance {
+                phase: StrokeFramePhase::End,
+                stage_timings: vec![
+                    frame_stage(PerformanceStageKey::StrokeCommit, stroke_commit_ms),
+                    frame_stage(PerformanceStageKey::DisplayTiles, display_tiles_ms),
+                ],
+                engine_total_ms: duration_ms(frame_start.elapsed()),
+            }),
         })
     }
 
     fn cancel_stroke(&mut self, payload: CancelStrokeRequest) -> Result<EngineMutationResult, String> {
+        let frame_start = Instant::now();
         let document = self
             .documents
             .get_mut(&payload.document_id)
@@ -261,11 +305,21 @@ impl EngineState {
             return Err("pointer id does not match active stroke".to_string());
         }
 
+        let display_tiles_start = Instant::now();
         let updates = document.compose_display_tiles(session.touched_tiles, None);
+        let display_tiles_ms = duration_ms(display_tiles_start.elapsed());
 
         Ok(EngineMutationResult {
             dirty_display_tiles: with_document_id(&payload.document_id, updates),
             document_dirty: document.dirty,
+            frame_performance: Some(FramePerformance {
+                phase: StrokeFramePhase::Cancel,
+                stage_timings: vec![frame_stage(
+                    PerformanceStageKey::DisplayTiles,
+                    display_tiles_ms,
+                )],
+                engine_total_ms: duration_ms(frame_start.elapsed()),
+            }),
         })
     }
 }
@@ -685,6 +739,39 @@ struct CancelStrokeRequest {
 struct EngineMutationResult {
     dirty_display_tiles: Vec<DisplayTileUpdate>,
     document_dirty: bool,
+    frame_performance: Option<FramePerformance>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FramePerformance {
+    phase: StrokeFramePhase,
+    stage_timings: Vec<FramePerformanceStage>,
+    engine_total_ms: f64,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StrokeFramePhase {
+    Begin,
+    Append,
+    End,
+    Cancel,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FramePerformanceStage {
+    key: PerformanceStageKey,
+    duration_ms: f64,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PerformanceStageKey {
+    StrokeInput,
+    StrokeCommit,
+    DisplayTiles,
 }
 
 #[derive(Serialize)]
@@ -727,6 +814,14 @@ fn with_document_id(document_id: &str, mut updates: Vec<DisplayTileUpdate>) -> V
     }
 
     updates
+}
+
+fn duration_ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
+}
+
+fn frame_stage(key: PerformanceStageKey, duration_ms: f64) -> FramePerformanceStage {
+    FramePerformanceStage { key, duration_ms }
 }
 
 fn title_from_path(path: &str) -> String {
